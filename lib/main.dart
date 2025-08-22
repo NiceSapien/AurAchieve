@@ -19,6 +19,12 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
 
 Future<void> _initializeNotifications() async {
   try {
+    // TEMPORARILY DISABLED: Notifications causing black screen issues
+    // TODO: Re-enable after fixing notification icon and channel setup
+    print("Notification initialization skipped to prevent black screen issues");
+    return;
+    
+    /* DISABLED CODE:
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/launcher_icon');
 
@@ -36,6 +42,7 @@ Future<void> _initializeNotifications() async {
 
     await flutterLocalNotificationsPlugin.initialize(initializationSettings);
     print("Notifications initialized successfully");
+    */
   } catch (e) {
     print("Failed to initialize notifications: $e");
     // Don't throw, let the app continue without notifications
@@ -43,15 +50,21 @@ Future<void> _initializeNotifications() async {
 }
 
 Future<void> _initializeTimezone() async {
-  tz_data.initializeTimeZones();
   try {
+    tz_data.initializeTimeZones();
     final String localTimezone = await FlutterTimezone.getLocalTimezone();
     tz.setLocalLocation(tz.getLocation(localTimezone));
     print("Timezone successfully set to: $localTimezone");
   } catch (e) {
     print("Could not get local timezone: $e");
-
-    tz.setLocalLocation(tz.getLocation('UTC'));
+    // Fallback to UTC to prevent startup issues
+    try {
+      tz.setLocalLocation(tz.getLocation('UTC'));
+      print("Fallback to UTC timezone");
+    } catch (e2) {
+      print("Error setting UTC timezone: $e2");
+      // Continue without timezone setup to prevent app crash
+    }
   }
 }
 

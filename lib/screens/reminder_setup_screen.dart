@@ -58,57 +58,68 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
   Future<void> _scheduleNotification() async {
     if (_selectedTime == null) return;
 
-    const androidDetails = AndroidNotificationDetails(
-      'habit_reminders',
-      'Habit Reminders',
-      channelDescription: 'Notifications to remind you of your habits',
-      importance: Importance.max,
-      priority: Priority.high,
-    );
-    const iosDetails = DarwinNotificationDetails();
-    const notificationDetails = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
+    try {
+      // TEMPORARILY DISABLED: Notifications causing black screen issues
+      print("Notification scheduling skipped - notifications are disabled");
+      return;
+      
+      /* DISABLED CODE:
+      const androidDetails = AndroidNotificationDetails(
+        'habit_reminders',
+        'Habit Reminders',
+        channelDescription: 'Notifications to remind you of your habits',
+        importance: Importance.max,
+        priority: Priority.high,
+      );
+      const iosDetails = DarwinNotificationDetails();
+      const notificationDetails = NotificationDetails(
+        android: androidDetails,
+        iOS: iosDetails,
+      );
 
-    final bool anyDaySelected = _selectedDays.any((d) => d);
+      final bool anyDaySelected = _selectedDays.any((d) => d);
 
-    if (anyDaySelected) {
-      for (int i = 0; i < _selectedDays.length; i++) {
-        if (_selectedDays[i]) {
-          final day = i + 1;
-          await flutterLocalNotificationsPlugin.zonedSchedule(
-            widget.habitName.hashCode + day,
-            'Time for your habit!',
-            'I will ${widget.habitName}, ${widget.habitCue}',
-            _nextInstanceOf(day, _selectedTime!),
-            notificationDetails,
-            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-            matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
-          );
+      if (anyDaySelected) {
+        for (int i = 0; i < _selectedDays.length; i++) {
+          if (_selectedDays[i]) {
+            final day = i + 1;
+            await flutterLocalNotificationsPlugin.zonedSchedule(
+              widget.habitName.hashCode + day,
+              'Time for your habit!',
+              'I will ${widget.habitName}, ${widget.habitCue}',
+              _nextInstanceOf(day, _selectedTime!),
+              notificationDetails,
+              androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+              matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+            );
+          }
         }
+      } else {
+        final now = tz.TZDateTime.now(tz.local);
+        tz.TZDateTime scheduledDate = tz.TZDateTime(
+          tz.local,
+          now.year,
+          now.month,
+          now.day,
+          _selectedTime!.hour,
+          _selectedTime!.minute,
+        );
+        if (scheduledDate.isBefore(now)) {
+          scheduledDate = scheduledDate.add(const Duration(days: 1));
+        }
+        await flutterLocalNotificationsPlugin.zonedSchedule(
+          widget.habitName.hashCode,
+          'Time for your habit!',
+          'I will ${widget.habitName}, ${widget.habitCue}',
+          scheduledDate,
+          notificationDetails,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        );
       }
-    } else {
-      final now = tz.TZDateTime.now(tz.local);
-      tz.TZDateTime scheduledDate = tz.TZDateTime(
-        tz.local,
-        now.year,
-        now.month,
-        now.day,
-        _selectedTime!.hour,
-        _selectedTime!.minute,
-      );
-      if (scheduledDate.isBefore(now)) {
-        scheduledDate = scheduledDate.add(const Duration(days: 1));
-      }
-      await flutterLocalNotificationsPlugin.zonedSchedule(
-        widget.habitName.hashCode,
-        'Time for your habit!',
-        'I will ${widget.habitName}, ${widget.habitCue}',
-        scheduledDate,
-        notificationDetails,
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      );
+      */
+    } catch (e) {
+      print("Error scheduling notification: $e");
+      // Continue without notification
     }
   }
 
