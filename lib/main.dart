@@ -18,22 +18,28 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 Future<void> _initializeNotifications() async {
-  const AndroidInitializationSettings initializationSettingsAndroid =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
+  try {
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/launcher_icon');
 
-  final DarwinInitializationSettings initializationSettingsIOS =
-      DarwinInitializationSettings(
-    requestAlertPermission: true,
-    requestBadgePermission: true,
-    requestSoundPermission: true,
-  );
+    final DarwinInitializationSettings initializationSettingsIOS =
+        DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
 
-  final InitializationSettings initializationSettings = InitializationSettings(
-    android: initializationSettingsAndroid,
-    iOS: initializationSettingsIOS,
-  );
+    final InitializationSettings initializationSettings = InitializationSettings(
+      android: initializationSettingsAndroid,
+      iOS: initializationSettingsIOS,
+    );
 
-  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+    print("Notifications initialized successfully");
+  } catch (e) {
+    print("Failed to initialize notifications: $e");
+    // Don't throw, let the app continue without notifications
+  }
 }
 
 Future<void> _initializeTimezone() async {
@@ -50,22 +56,34 @@ Future<void> _initializeTimezone() async {
 }
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    WidgetsFlutterBinding.ensureInitialized();
 
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-  await _initializeTimezone();
-  await _initializeNotifications();
+    await _initializeTimezone();
+    await _initializeNotifications();
 
-  //  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    //  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  Client client = Client();
-  client
-      .setEndpoint('https://fra.cloud.appwrite.io/v1')
-      .setProject('6800a2680008a268a6a3')
-      .setSelfSigned(status: true);
-  Account account = Account(client);
-  runApp(MyApp(account: account));
+    Client client = Client();
+    client
+        .setEndpoint('https://fra.cloud.appwrite.io/v1')
+        .setProject('6800a2680008a268a6a3')
+        .setSelfSigned(status: true);
+    Account account = Account(client);
+    runApp(MyApp(account: account));
+  } catch (e) {
+    print("Critical error during app initialization: $e");
+    // Create a minimal fallback app in case of critical failures
+    runApp(MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Text('App initialization failed. Please restart the app.'),
+        ),
+      ),
+    ));
+  }
 }
 
 class MyApp extends StatelessWidget {
