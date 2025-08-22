@@ -18,54 +18,85 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 Future<void> _initializeNotifications() async {
-  const AndroidInitializationSettings initializationSettingsAndroid =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
+  try {
+    // TEMPORARILY DISABLED: Notifications causing black screen issues
+    // TODO: Re-enable after fixing notification icon and channel setup
+    print("Notification initialization skipped to prevent black screen issues");
+    return;
+    
+    /* DISABLED CODE:
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/launcher_icon');
 
-  final DarwinInitializationSettings initializationSettingsIOS =
-      DarwinInitializationSettings(
-    requestAlertPermission: true,
-    requestBadgePermission: true,
-    requestSoundPermission: true,
-  );
+    final DarwinInitializationSettings initializationSettingsIOS =
+        DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
 
-  final InitializationSettings initializationSettings = InitializationSettings(
-    android: initializationSettingsAndroid,
-    iOS: initializationSettingsIOS,
-  );
+    final InitializationSettings initializationSettings = InitializationSettings(
+      android: initializationSettingsAndroid,
+      iOS: initializationSettingsIOS,
+    );
 
-  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+    print("Notifications initialized successfully");
+    */
+  } catch (e) {
+    print("Failed to initialize notifications: $e");
+    // Don't throw, let the app continue without notifications
+  }
 }
 
 Future<void> _initializeTimezone() async {
-  tz_data.initializeTimeZones();
   try {
+    tz_data.initializeTimeZones();
     final String localTimezone = await FlutterTimezone.getLocalTimezone();
     tz.setLocalLocation(tz.getLocation(localTimezone));
     print("Timezone successfully set to: $localTimezone");
   } catch (e) {
     print("Could not get local timezone: $e");
-
-    tz.setLocalLocation(tz.getLocation('UTC'));
+    // Fallback to UTC to prevent startup issues
+    try {
+      tz.setLocalLocation(tz.getLocation('UTC'));
+      print("Fallback to UTC timezone");
+    } catch (e2) {
+      print("Error setting UTC timezone: $e2");
+      // Continue without timezone setup to prevent app crash
+    }
   }
 }
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    WidgetsFlutterBinding.ensureInitialized();
 
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-  await _initializeTimezone();
-  await _initializeNotifications();
+    await _initializeTimezone();
+    await _initializeNotifications();
 
-  //  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    //  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  Client client = Client();
-  client
-      .setEndpoint('https://fra.cloud.appwrite.io/v1')
-      .setProject('6800a2680008a268a6a3')
-      .setSelfSigned(status: true);
-  Account account = Account(client);
-  runApp(MyApp(account: account));
+    Client client = Client();
+    client
+        .setEndpoint('https://fra.cloud.appwrite.io/v1')
+        .setProject('6800a2680008a268a6a3')
+        .setSelfSigned(status: true);
+    Account account = Account(client);
+    runApp(MyApp(account: account));
+  } catch (e) {
+    print("Critical error during app initialization: $e");
+    // Create a minimal fallback app in case of critical failures
+    runApp(MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Text('App initialization failed. Please restart the app.'),
+        ),
+      ),
+    ));
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -149,16 +180,20 @@ class _AuthCheckState extends State<AuthCheck> {
         print("Failed to create JWT: $e");
         await _storage.delete(key: 'jwt_token');
       }
-      setState(() {
-        loggedInUser = user;
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          loggedInUser = user;
+          isLoading = false;
+        });
+      }
     } catch (e) {
       await _storage.delete(key: 'jwt_token');
-      setState(() {
-        isLoading = false;
-        loggedInUser = null;
-      });
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+          loggedInUser = null;
+        });
+      }
     }
   }
 

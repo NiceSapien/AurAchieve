@@ -33,7 +33,7 @@ class ApiService {
     final response = await http.get(
       Uri.parse('$_baseUrl/api/user/profile'),
       headers: headers,
-    );
+    ).timeout(const Duration(seconds: 10));
 
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
@@ -50,7 +50,7 @@ class ApiService {
     final response = await http.get(
       Uri.parse('$_baseUrl/api/tasks'),
       headers: headers,
-    );
+    ).timeout(const Duration(seconds: 10));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else {
@@ -381,7 +381,7 @@ class ApiService {
     final res = await http.get(
       Uri.parse('$_baseUrl/api/habit'),
       headers: headers,
-    );
+    ).timeout(const Duration(seconds: 10));
     if (res.statusCode != 200) {
       throw Exception('Failed to load habits: ${res.body}');
     }
