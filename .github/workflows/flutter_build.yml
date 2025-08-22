@@ -59,7 +59,7 @@ jobs:
       # NOTE: Analyze and test steps removed.
 
       - name: Build Flutter APK (Release with testkey)
-        run: flutter build apk --release
+        run: flutter build apk --release --no-tree-shake-icons
 
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
