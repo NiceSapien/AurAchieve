@@ -149,16 +149,20 @@ class _AuthCheckState extends State<AuthCheck> {
         print("Failed to create JWT: $e");
         await _storage.delete(key: 'jwt_token');
       }
-      setState(() {
-        loggedInUser = user;
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          loggedInUser = user;
+          isLoading = false;
+        });
+      }
     } catch (e) {
       await _storage.delete(key: 'jwt_token');
-      setState(() {
-        isLoading = false;
-        loggedInUser = null;
-      });
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+          loggedInUser = null;
+        });
+      }
     }
   }
 
