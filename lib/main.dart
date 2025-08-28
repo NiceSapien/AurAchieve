@@ -19,9 +19,9 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
 
 Future<void> _initializeNotifications() async {
   const AndroidInitializationSettings initializationSettingsAndroid =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
+      AndroidInitializationSettings('@mipmap/launcher_icon');
 
-  final DarwinInitializationSettings initializationSettingsIOS =
+  const DarwinInitializationSettings initializationSettingsIOS =
       DarwinInitializationSettings(
     requestAlertPermission: true,
     requestBadgePermission: true,

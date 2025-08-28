@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -34,6 +36,21 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
   void initState() {
     super.initState();
     tz.initializeTimeZones();
+  }
+
+  Future<bool> _requestPermissions() async {
+    if (Platform.isIOS) {
+      return await flutterLocalNotificationsPlugin
+              .resolvePlatformSpecificImplementation<
+                IOSFlutterLocalNotificationsPlugin
+              >()
+              ?.requestPermissions(alert: true, badge: true, sound: true) ??
+          false;
+    } else if (Platform.isAndroid) {
+      // On Android, permissions are handled by the system or manifest.
+      return true;
+    }
+    return false;
   }
 
   tz.TZDateTime _nextInstanceOf(int day, TimeOfDay time) {
@@ -121,7 +138,8 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
         habitLocation: widget.habitCue,
       );
 
-      String habitId = created[r'$id'] ?? created['id'] ?? created['habitId'] ?? '';
+      String habitId =
+          created[r'$id'] ?? created['id'] ?? created['habitId'] ?? '';
       if (_selectedTime != null && habitId.isNotEmpty) {
         final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
         final timeStr = _selectedTime!.format(context);
@@ -141,12 +159,13 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Habit saved successfully!')),
         );
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error saving habit: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error saving habit: $e')));
       }
     } finally {
       if (mounted) {
@@ -184,9 +203,48 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
               ),
               trailing: Icon(Icons.arrow_forward_ios, color: onSurface),
               onTap: () async {
+                final hasPermissions = await _requestPermissions();
+                if (!hasPermissions && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Notification permissions are required to set reminders.'),
+                    ),
+                  );
+                  return;
+                }
                 final time = await showTimePicker(
                   context: context,
                   initialTime: _selectedTime ?? TimeOfDay.now(),
+                  builder: (context, child) {
+                    final theme = Theme.of(context);
+                    final cs = theme.colorScheme;
+                    return Theme(
+                      data: theme.copyWith(
+                        colorScheme: cs.copyWith(
+                          primary: cs.primary,
+                          onPrimary: cs.onPrimary,
+                          surface: cs.surface,
+                          onSurface: cs.onSurface,
+                        ),
+                        textButtonTheme: TextButtonThemeData(
+                          style: TextButton.styleFrom(
+                            foregroundColor: cs.primary,
+                          ),
+                        ),
+                        timePickerTheme: TimePickerThemeData(
+                          helpTextStyle: TextStyle(
+                            color: cs.onSurface,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          hourMinuteTextColor: cs.onSurface,
+                          dayPeriodTextColor: cs.onSurface,
+                          dialHandColor: cs.primary,
+                          dialBackgroundColor: cs.surfaceContainerHigh,
+                        ),
+                      ),
+                      child: child!,
+                    );
+                  },
                 );
                 if (time != null) {
                   setState(() => _selectedTime = time);
@@ -209,23 +267,31 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
               }),
             ),
             const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: _isSaving ? null : _saveHabitAndReminder,
-                child: Text(_isSaving ? 'Saving...' : 'Save Habit & Reminder'),
-              ),
-            ),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: _isSaving
-                    ? null
-                    : () {
-                        _selectedTime = null;
-                        _saveHabitAndReminder();
-                      },
-                child: const Text('Save without reminder'),
+            SafeArea(
+              top: false,
+              minimum: const EdgeInsets.only(top: 8, bottom: 12),
+              child: Column(
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: _isSaving ? null : _saveHabitAndReminder,
+                      child: Text(_isSaving ? 'Saving...' : 'Save Habit & Reminder'),
+                    ),
+                  ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      onPressed: _isSaving
+                          ? null
+                          : () {
+                              _selectedTime = null;
+                              _saveHabitAndReminder();
+                            },
+                      child: const Text('Save without reminder'),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

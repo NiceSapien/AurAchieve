@@ -3,6 +3,12 @@ import 'package:http/http.dart' as http;
 import 'package:appwrite/appwrite.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/foundation.dart';
+
+// Top-level function for JSON parsing in a separate isolate
+dynamic _parseJson(String jsonString) {
+  return jsonDecode(jsonString);
+}
 
 class ApiService {
   final String _baseUrl =
@@ -52,7 +58,7 @@ class ApiService {
       headers: headers,
     );
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as List<dynamic>;
     } else {
       throw Exception('Failed to load tasks: ${response.body}');
     }
@@ -80,7 +86,7 @@ class ApiService {
       }),
     );
     if (response.statusCode == 201) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
     } else {
       throw Exception('Failed to create task: ${response.body}');
     }
@@ -107,7 +113,7 @@ class ApiService {
       body: jsonEncode({'verificationType': 'honor'}),
     );
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
     } else {
       throw Exception(
         'Failed to complete normal non-verifiable task: ${response.body}',
@@ -129,7 +135,7 @@ class ApiService {
       }),
     );
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
     } else {
       throw Exception(
         'Failed to complete normal image verifiable task: ${response.body}',
@@ -145,7 +151,7 @@ class ApiService {
       body: jsonEncode({'verificationType': 'bad_task_completion'}),
     );
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
     } else {
       throw Exception('Failed to complete bad task: ${response.body}');
     }
@@ -168,7 +174,7 @@ class ApiService {
       body: jsonEncode(body),
     );
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
     } else {
       throw Exception('Failed to complete timed task: ${response.body}');
     }
@@ -181,7 +187,7 @@ class ApiService {
       headers: headers,
     );
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
     } else {
       throw Exception('Failed to mark task as bad: ${response.body}');
     }
@@ -194,7 +200,7 @@ class ApiService {
       headers: headers,
     );
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
+      final data = await compute(_parseJson, response.body);
       if (data is Map<String, dynamic> && data.isNotEmpty) {
         return data;
       }
@@ -239,7 +245,7 @@ class ApiService {
       }),
     );
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
     } else {
       throw Exception('Failed to complete social blocker: ${response.body}');
     }
@@ -259,7 +265,7 @@ class ApiService {
           response.body == "{}") {
         return null;
       }
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
     } else if (response.statusCode == 404) {
       return null;
     } else {
@@ -291,7 +297,7 @@ class ApiService {
     );
 
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as List<dynamic>;
     } else {
       throw Exception('Failed to generate timetable preview: ${response.body}');
     }
@@ -319,7 +325,7 @@ class ApiService {
     );
 
     if (response.statusCode == 201) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
     } else {
       throw Exception('Failed to save study plan: ${response.body}');
     }
@@ -337,7 +343,7 @@ class ApiService {
       body: jsonEncode({'clientDate': clientDate, 'dateOfTask': dateOfTask}),
     );
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
     } else {
       throw Exception('Failed to complete task: ${response.body}');
     }
@@ -370,7 +376,7 @@ class ApiService {
       }),
     );
     if (response.statusCode == 200 || response.statusCode == 201) {
-      return jsonDecode(response.body);
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
     } else {
       throw Exception('Failed to add habit: ${response.body}');
     }
@@ -385,7 +391,7 @@ class ApiService {
     if (res.statusCode != 200) {
       throw Exception('Failed to load habits: ${res.body}');
     }
-    final data = jsonDecode(res.body);
+    final data = await compute(_parseJson, res.body);
     if (data is List) return data;
     if (data is Map) {
       if (data['habits'] is List) return List.from(data['habits']);
@@ -397,7 +403,7 @@ class ApiService {
     return [];
   }
 
-  Future<Map<String, dynamic>> incrementHabitCompletedTimes(
+  Future<void> incrementHabitCompletedTimes(
     String habitId,
   ) async {
     final headers = await _getHeaders();
@@ -406,9 +412,7 @@ class ApiService {
       headers: headers,
       body: jsonEncode({'habitId': habitId, 'incrementCompletedTimes': 1}),
     );
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
+    if (response.statusCode != 201) {
       throw Exception('Failed to update habit: ${response.body}');
     }
   }

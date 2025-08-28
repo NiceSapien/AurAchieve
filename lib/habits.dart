@@ -3,52 +3,102 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'api_service.dart';
 import 'screens/habit_setup.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:async';
-import 'package:auraascend/widgets/dynamic_color_svg.dart' as dynamic_color_svg;
+import 'package:vector_math/vector_math_64.dart' as vector;
+import 'widgets/dynamic_color_svg.dart' as dynamic_color_svg;
 
 class HabitsPage extends StatefulWidget {
   final ApiService apiService;
   const HabitsPage({super.key, required this.apiService});
-
   @override
   State<HabitsPage> createState() => _HabitsPageState();
 }
 
-class _HabitsPageState extends State<HabitsPage>
-    with SingleTickerProviderStateMixin {
+class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   bool _loading = true;
   bool _updating = false;
   List<Map<String, dynamic>> _habits = [];
-
   AnimationController? _holdController;
   static const Duration _holdDuration = Duration(milliseconds: 700);
   int? _holdingIndex;
-
   Timer? _pressDelayTimer;
   Offset? _pressStartPosition;
   static const double _moveTolerance = 8.0;
+  late AnimationController _bounceController;
+  late Animation<double> _bounceScale;
+  int? _completedIndex;
 
   @override
   void initState() {
     super.initState();
     _holdController = AnimationController(vsync: this, duration: _holdDuration)
       ..addListener(() {
-        if (mounted && _holdingIndex != null) {
-          setState(() {}); // repaint fill
-        }
+        if (mounted && _holdingIndex != null) setState(() {});
       })
       ..addStatusListener((s) {
         if (s == AnimationStatus.completed && _holdingIndex != null) {
           final idx = _holdingIndex!;
           final h = _habits[idx];
           final id = (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '').toString();
-          if (id.isNotEmpty) {
-            _incrementCompleted(id, idx);
-          }
+          if (id.isNotEmpty) _incrementCompleted(id, idx);
           _resetHold();
         }
       });
+    _bounceController =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 900),
+        )..addStatusListener((status) {
+          if (status == AnimationStatus.completed && mounted) {
+            setState(() => _completedIndex = null);
+          }
+        });
+    _bounceScale = _bounceController.drive(
+      TweenSequence<double>([
+        TweenSequenceItem(
+          tween: Tween(
+            begin: 0.0,
+            end: -0.06,
+          ).chain(CurveTween(curve: Curves.easeIn)),
+          weight: 10,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: -0.06,
+            end: 0.18,
+          ).chain(CurveTween(curve: Curves.easeOut)),
+          weight: 22,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: 0.18,
+            end: -0.03,
+          ).chain(CurveTween(curve: Curves.easeInOut)),
+          weight: 14,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: -0.03,
+            end: 0.08,
+          ).chain(CurveTween(curve: Curves.easeInOut)),
+          weight: 12,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: 0.08,
+            end: -0.015,
+          ).chain(CurveTween(curve: Curves.easeInOut)),
+          weight: 10,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: -0.015,
+            end: 0.0,
+          ).chain(CurveTween(curve: Curves.easeOut)),
+          weight: 8,
+        ),
+      ]),
+    );
     _loadHabits();
   }
 
@@ -56,6 +106,7 @@ class _HabitsPageState extends State<HabitsPage>
   void dispose() {
     _pressDelayTimer?.cancel();
     _holdController?.dispose();
+    _bounceController.dispose();
     super.dispose();
   }
 
@@ -66,9 +117,7 @@ class _HabitsPageState extends State<HabitsPage>
       c.stop();
       c.reset();
     }
-    if (mounted) {
-      setState(() => _holdingIndex = null);
-    }
+    if (mounted) setState(() => _holdingIndex = null);
   }
 
   void _startHoldAnimation(int index) {
@@ -90,9 +139,8 @@ class _HabitsPageState extends State<HabitsPage>
         final localRem = id != null
             ? await widget.apiService.getHabitReminderLocal(id.toString())
             : null;
-        if (localRem != null && localRem.isNotEmpty) {
+        if (localRem != null && localRem.isNotEmpty)
           m['habitReminder'] = localRem;
-        }
         m['completedTimes'] = m['completedTimes'] ?? 0;
         normalized.add(m);
       }
@@ -111,66 +159,96 @@ class _HabitsPageState extends State<HabitsPage>
   ShapeBorder _shapeForIndex(int i) {
     switch (i % 6) {
       case 0:
-        return const StadiumBorder();
+        return RoundedRectangleBorder(
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(16),
+            topRight: Radius.circular(50),
+            bottomLeft: Radius.circular(50),
+            bottomRight: Radius.circular(16),
+          ),
+        );
       case 1:
         return RoundedRectangleBorder(borderRadius: BorderRadius.circular(40));
       case 2:
         return const ContinuousRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(56)),
+          borderRadius: BorderRadius.all(Radius.circular(60)),
         );
       case 3:
-        return BeveledRectangleBorder(borderRadius: BorderRadius.circular(18));
+        return BeveledRectangleBorder(borderRadius: BorderRadius.circular(24));
       case 4:
         return RoundedRectangleBorder(
           borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(48),
-            topRight: Radius.circular(20),
-            bottomLeft: Radius.circular(28),
-            bottomRight: Radius.circular(8),
+            topLeft: Radius.circular(50),
+            bottomRight: Radius.circular(50),
           ),
         );
       default:
-        return RoundedRectangleBorder(borderRadius: BorderRadius.circular(32));
+        return RoundedRectangleBorder(borderRadius: BorderRadius.circular(28));
     }
   }
 
   ({Color bg, Color fg}) _colorsForIndex(int i, ColorScheme s) {
+    Color elevate(Color surface, Color accent) {
+      final base = (surface.alpha == 0 || surface.opacity < 0.05)
+          ? s.surface
+          : surface;
+      return Color.alphaBlend(accent.withOpacity(0.12), base);
+    }
+
     switch (i % 5) {
       case 0:
-        return (bg: s.secondaryContainer, fg: s.onSecondaryContainer);
+        return (
+          bg: elevate(s.secondaryContainer, s.secondary),
+          fg: s.onSecondaryContainer,
+        );
       case 1:
-        return (bg: s.primaryContainer, fg: s.onPrimaryContainer);
+        return (
+          bg: elevate(s.primaryContainer, s.primary),
+          fg: s.onPrimaryContainer,
+        );
       case 2:
-        return (bg: s.tertiaryContainer, fg: s.onTertiaryContainer);
+        return (
+          bg: elevate(s.tertiaryContainer, s.tertiary),
+          fg: s.onTertiaryContainer,
+        );
       case 3:
-        return (bg: s.surfaceContainerHighest, fg: s.onSurfaceVariant);
+        return (
+          bg: elevate(s.surfaceContainerHighest, s.primary),
+          fg: s.onSurfaceVariant,
+        );
       default:
-        return (bg: s.surfaceContainerHigh, fg: s.onSurface);
+        return (
+          bg: elevate(s.surfaceContainerHigh, s.secondary),
+          fg: s.onSurface,
+        );
     }
   }
 
   Future<void> _incrementCompleted(String habitId, int index) async {
     if (_updating) return;
     _updating = true;
+    final previousCount = _habits[index]['completedTimes'] as int? ?? 0;
+    setState(() {
+      _habits[index]['completedTimes'] = previousCount + 1;
+      _completedIndex = index;
+    });
+    _bounceController.forward(from: 0);
     try {
-      final updated = await widget.apiService.incrementHabitCompletedTimes(
-        habitId,
-      );
+      await widget.apiService.incrementHabitCompletedTimes(habitId);
       if (!mounted) return;
-      setState(() {
-        final ct =
-            (updated['completedTimes'] ?? _habits[index]['completedTimes'] ?? 0)
-                as int;
-        _habits[index]['completedTimes'] = ct;
-      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          duration: Duration(milliseconds: 800),
-          content: Text('Progress +1'),
+          duration: Duration(milliseconds: 1200),
+          content: Text('Habit marked as complete'),
+          behavior: SnackBarBehavior.floating,
         ),
       );
     } catch (e) {
       if (!mounted) return;
+      setState(() {
+        _habits[index]['completedTimes'] = previousCount;
+        _completedIndex = null;
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
@@ -191,16 +269,13 @@ class _HabitsPageState extends State<HabitsPage>
 
   String? _todayReminderTime(List<String> reminders) {
     if (reminders.isEmpty) return null;
-    final now = DateTime.now();
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final now = DateTime.now();
     final today = days[now.weekday - 1];
     for (final r in reminders) {
-      if (r.startsWith(today)) {
-        return r.replaceFirst('$today ', '');
-      }
-      if (r.toLowerCase().startsWith('daily')) {
+      if (r.startsWith(today)) return r.replaceFirst('$today ', '');
+      if (r.toLowerCase().startsWith('daily'))
         return r.replaceFirst(RegExp('[Dd]aily ?'), '');
-      }
     }
     return null;
   }
@@ -209,7 +284,6 @@ class _HabitsPageState extends State<HabitsPage>
     final c = _holdController;
     final holding = _holdingIndex == index && c != null;
     final progress = holding ? c.value : 0.0;
-
     final id = (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '').toString();
     final name = (h['habitName'] ?? h['habit'] ?? '').toString();
     final goal = (h['habitGoal'] ?? h['goal'] ?? '').toString();
@@ -218,15 +292,21 @@ class _HabitsPageState extends State<HabitsPage>
             (h['habitReminder'] as List).map((e) => e.toString()),
           )
         : const <String>[];
-
     final colorPair = _colorsForIndex(index, scheme);
     final shape = _shapeForIndex(index);
-
     final showReminder = _hasReminderToday(reminders);
     final reminderTime = showReminder ? _todayReminderTime(reminders) : null;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 23),
+    return AnimatedBuilder(
+      animation: _bounceController,
+      builder: (context, child) {
+        double scale = 1.0;
+        if (_completedIndex != null && index == _completedIndex) {
+          scale = 1.0 + _bounceScale.value;
+        }
+        if (holding) scale *= (1 - (progress * 0.04));
+        return Transform.scale(scale: scale, child: child);
+      },
       child: Listener(
         behavior: HitTestBehavior.opaque,
         onPointerDown: (event) {
@@ -234,9 +314,8 @@ class _HabitsPageState extends State<HabitsPage>
           _pressStartPosition = event.position;
           _pressDelayTimer?.cancel();
           _pressDelayTimer = Timer(const Duration(milliseconds: 50), () {
-            if (_pressStartPosition != null && _holdingIndex == null) {
+            if (_pressStartPosition != null && _holdingIndex == null)
               _startHoldAnimation(index);
-            }
           });
         },
         onPointerMove: (event) {
@@ -252,132 +331,126 @@ class _HabitsPageState extends State<HabitsPage>
         },
         onPointerUp: (_) => _resetHold(),
         onPointerCancel: (_) => _resetHold(),
-        child: AnimatedScale(
-          scale: holding ? (1 - (progress * 0.04)) : 1.0,
-          duration: const Duration(milliseconds: 50),
-          curve: Curves.easeOut,
-          child: Material(
-            clipBehavior: Clip.antiAlias,
-            color: colorPair.bg,
-            elevation: 3,
-            shadowColor: scheme.shadow.withOpacity(0.25),
-            shape: shape,
-            child: Stack(
-              children: [
-                // Fill overlay (water rising)
-                Positioned.fill(
-                  child: Align(
-                    alignment: Alignment.bottomCenter,
-                    child: FractionallySizedBox(
-                      heightFactor: progress,
-                      widthFactor: 1,
-                      child: Container(color: colorPair.fg.withOpacity(0.10)),
-                    ),
+        child: Material(
+          clipBehavior: Clip.antiAlias,
+          color: colorPair.bg,
+          elevation: 3,
+          shadowColor: scheme.shadow.withOpacity(0.25),
+          shape: shape,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: FractionallySizedBox(
+                    heightFactor: progress,
+                    widthFactor: 1,
+                    child: Container(color: colorPair.fg.withOpacity(0.10)),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'I will',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.gabarito(
-                            fontSize: 14,
-                            color: colorPair.fg.withOpacity(0.8),
-                            fontWeight: FontWeight.w500,
-                            letterSpacing: 0.3,
-                          ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'I will',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.gabarito(
+                          fontSize: 12,
+                          color: colorPair.fg.withOpacity(0.8),
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 0.3,
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          name,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        name,
+                        textAlign: TextAlign.center,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.gabarito(
+                          fontSize: 20,
+                          height: 1.1,
+                          fontWeight: FontWeight.w800,
+                          color: colorPair.fg,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        'to become a',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.gabarito(
+                          fontSize: 12,
+                          color: colorPair.fg.withOpacity(0.72),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colorPair.fg.withOpacity(0.10),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          goal,
                           textAlign: TextAlign.center,
-                          maxLines: 3,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.gabarito(
-                            fontSize: 26,
-                            height: 1.08,
-                            fontWeight: FontWeight.w800,
-                            color: colorPair.fg,
-                            letterSpacing: -0.4,
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        Text(
-                          'so that I can become a',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.gabarito(
                             fontSize: 14,
-                            color: colorPair.fg.withOpacity(0.72),
-                            fontWeight: FontWeight.w500,
+                            fontWeight: FontWeight.w700,
+                            color: colorPair.fg,
+                            letterSpacing: 0.2,
                           ),
                         ),
-                        const SizedBox(height: 10),
+                      ),
+                      const Spacer(),
+                      if (reminderTime != null) ...[
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 12,
+                            horizontal: 10,
+                            vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: colorPair.fg.withOpacity(0.10),
-                            borderRadius: BorderRadius.circular(18),
+                            color: colorPair.fg.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
-                            goal,
+                            reminderTime,
                             textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.gabarito(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
                               color: colorPair.fg,
-                              letterSpacing: 0.2,
                             ),
                           ),
                         ),
-                        if (reminderTime != null) ...[
-                          const SizedBox(height: 16),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: colorPair.fg.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Text(
-                              reminderTime,
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.gabarito(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: colorPair.fg,
-                              ),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 6),
-                        Text(
-                          'Completed: ${h['completedTimes']}',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.gabarito(
-                            fontSize: 11,
-                            color: colorPair.fg.withOpacity(0.55),
-                          ),
-                        ),
+                        const SizedBox(height: 4),
                       ],
-                    ),
+                      Text(
+                        'Completed: ${h['completedTimes']}',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.gabarito(
+                          fontSize: 10,
+                          color: colorPair.fg.withOpacity(0.55),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -387,9 +460,7 @@ class _HabitsPageState extends State<HabitsPage>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-
     return Scaffold(
-      // No AppBar (per earlier customization)
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _habits.isEmpty
@@ -397,7 +468,7 @@ class _HabitsPageState extends State<HabitsPage>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  DynamicColorSvg(
+                  dynamic_color_svg.DynamicColorSvg(
                     assetName: 'assets/img/habit.svg',
                     color: scheme.primary,
                     width: 240,
@@ -425,13 +496,18 @@ class _HabitsPageState extends State<HabitsPage>
             )
           : RefreshIndicator(
               onRefresh: _loadHabits,
-              child: ListView.separated(
+              child: GridView.builder(
                 physics: const BouncingScrollPhysics(
                   parent: AlwaysScrollableScrollPhysics(),
                 ),
-                padding: const EdgeInsets.fromLTRB(0, 20, 0, 120),
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 120),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  childAspectRatio: 0.7,
+                ),
                 itemCount: _habits.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 22),
                 itemBuilder: (context, index) =>
                     _habitCard(_habits[index], index, scheme),
               ),
@@ -446,9 +522,7 @@ class _HabitsPageState extends State<HabitsPage>
                   HabitSetup(userName: 'You', apiService: widget.apiService),
             ),
           );
-          if (result != null && mounted) {
-            await _loadHabits();
-          }
+          if (result == true && mounted) await _loadHabits();
         },
         icon: const Icon(Icons.add),
         label: const Text('Add Habit'),
