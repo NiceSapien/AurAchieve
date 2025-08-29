@@ -27,6 +27,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   late Animation<double> _bounceScale;
   int? _completedIndex;
   bool _holdTriggered = false;
+  bool _pointerMoved = false; // add this
 
   @override
   void initState() {
@@ -124,6 +125,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     final c = _holdController;
     if (c == null) return;
     _holdTriggered = false;
+    _pointerMoved = false;
     setState(() => _holdingIndex = index);
     c.forward(from: 0);
   }
@@ -346,7 +348,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                     Expanded(
                       child: _metricBox(
                         title: 'Streak',
-                        value: '4 days',
+                        value: '7 days',
                         icon: Icons.local_fire_department_rounded,
                         cs: cs,
                         iconColor: cs.primary,
@@ -356,7 +358,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                     Expanded(
                       child: _metricBox(
                         title: 'Consistency',
-                        value: '73%',
+                        value: '69%',
                         icon: Icons.insights_rounded,
                         cs: cs,
                         iconColor: cs.tertiary,
@@ -559,17 +561,20 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         behavior: HitTestBehavior.opaque,
         onPointerDown: (event) {
           if (id.isEmpty) return;
+          _pointerMoved = false;
           _pressStartPosition = event.position;
           _pressDelayTimer?.cancel();
           _pressDelayTimer = Timer(const Duration(milliseconds: 50), () {
-            if (_pressStartPosition != null && _holdingIndex == null)
+            if (_pressStartPosition != null && _holdingIndex == null) {
               _startHoldAnimation(index);
+            }
           });
         },
         onPointerMove: (event) {
           if (_pressStartPosition == null) return;
           final moved = (event.position - _pressStartPosition!).distance;
           if (moved > _moveTolerance) {
+            _pointerMoved = true;
             if (_holdingIndex != null) {
               _resetHold();
             } else {
@@ -579,10 +584,13 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         },
         onPointerUp: (_) {
           final wasHold = _holdTriggered;
+          final moved = _pointerMoved;
           _resetHold();
-          if (!wasHold) _showHabitDetails(h);
+          if (!wasHold && !moved) _showHabitDetails(h);
         },
-        onPointerCancel: (_) => _resetHold(),
+        onPointerCancel: (_) {
+          _resetHold();
+        },
         child: Material(
           clipBehavior: Clip.antiAlias,
           color: colorPair.bg,
