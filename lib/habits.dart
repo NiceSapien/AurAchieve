@@ -139,8 +139,9 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         final localRem = id != null
             ? await widget.apiService.getHabitReminderLocal(id.toString())
             : null;
-        if (localRem != null && localRem.isNotEmpty)
+        if (localRem != null && localRem.isNotEmpty) {
           m['habitReminder'] = localRem;
+        }
         m['completedTimes'] = m['completedTimes'] ?? 0;
         normalized.add(m);
       }
@@ -274,8 +275,9 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     final today = days[now.weekday - 1];
     for (final r in reminders) {
       if (r.startsWith(today)) return r.replaceFirst('$today ', '');
-      if (r.toLowerCase().startsWith('daily'))
+      if (r.toLowerCase().startsWith('daily')) {
         return r.replaceFirst(RegExp('[Dd]aily ?'), '');
+      }
     }
     return null;
   }
@@ -314,8 +316,9 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
           _pressStartPosition = event.position;
           _pressDelayTimer?.cancel();
           _pressDelayTimer = Timer(const Duration(milliseconds: 50), () {
-            if (_pressStartPosition != null && _holdingIndex == null)
+            if (_pressStartPosition != null && _holdingIndex == null) {
               _startHoldAnimation(index);
+            }
           });
         },
         onPointerMove: (event) {

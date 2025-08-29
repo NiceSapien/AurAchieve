@@ -11,42 +11,70 @@ class HabitSetup extends StatefulWidget {
     required this.userName,
     required this.apiService,
   });
+
   @override
   State<HabitSetup> createState() => _HabitSetupState();
 }
 
 class _HabitSetupState extends State<HabitSetup> {
-  int _introPage = 0;
-  int? _editingIndex;
+  int _introPage = 0; // 0, 1, 2 for intro, 3 for edit
+  int? _editingIndex; // null if not editing, 0/1/2 for which part
   final List<String> _values = [
-    'habit',
-    'time/location',
-    'type of person I want to be',
+    "habit",
+    "time/location",
+    "type of person I want to be",
   ];
   final List<String> _placeholders = [
-    'habit',
-    'time/location',
-    'type of person I want to be',
+    "habit",
+    "time/location",
+    "type of person I want to be",
   ];
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  static const habitSuggestions = ['exercise', 'study'];
-  static const cueSuggestions = [];
-  static const goalSuggestions = [];
+
+  static const habitSuggestions = [
+    'exercise',
+    'study',
+    'put on my running shoes',
+    'take a deep breath',
+    'meditate for 10 minutes',
+    'write one sentence',
+    'text one friend',
+    'read 20 pages',
+    'pray',
+    'go for a walk',
+    'eat one bite of salad',
+  ];
+  static const cueSuggestions = [
+    'when I wake up',
+    'every day at 7am',
+    'after I finish breakfast',
+    'in the bathroom',
+    'when I close my laptop',
+  ];
+  static const goalSuggestions = [
+    'a stronger person',
+    'a smarter person',
+    'an active person',
+    'a mindful person',
+    'a dedicated musician',
+    'a writer',
+    'a healthy person',
+  ];
+
   final bool _suggestionsExpanded = true;
   bool _introForward = true;
   final bool _submitting = false;
 
-  bool get _isComplete =>
-      _values[0].trim().isNotEmpty &&
-      _values[0] != _placeholders[0] &&
-      _values[1].trim().isNotEmpty &&
-      _values[1] != _placeholders[1] &&
-      _values[2].trim().isNotEmpty &&
-      _values[2] != _placeholders[2];
+  bool get _isComplete {
+    return List.generate(3, (i) => i).every(
+      (i) => _values[i].trim().isNotEmpty && _values[i] != _placeholders[i],
+    );
+  }
 
-  Future<void> _continueToReminders() async {
-    final result = await Navigator.push(
+  void _continueToReminders() {
+    if (!_isComplete) return;
+    Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ReminderSetupScreen(
@@ -57,7 +85,6 @@ class _HabitSetupState extends State<HabitSetup> {
         ),
       ),
     );
-    if (result == true && mounted) Navigator.pop(context, true);
   }
 
   @override
@@ -68,31 +95,26 @@ class _HabitSetupState extends State<HabitSetup> {
   }
 
   void _nextIntro() {
-    setState(() {
-      if (_introPage < 2) {
-        _introForward = true;
-        _introPage++;
-      } else {
-        _introPage = 3;
-        _startEdit(0);
-      }
-    });
+    _introForward = true;
+    if (_introPage < 2) {
+      setState(() => _introPage++);
+    } else {
+      setState(() => _introPage = 3);
+    }
   }
 
   void _backIntro() {
-    setState(() {
-      if (_introPage > 0) {
-        _introForward = false;
-        _introPage--;
-      }
-    });
+    _introForward = false;
+    if (_introPage > 0) {
+      setState(() => _introPage--);
+    }
   }
 
   void _startEdit(int index) {
     setState(() {
       _editingIndex = index;
-      _inputController.text = (_values[index] == _placeholders[index])
-          ? ''
+      _inputController.text = _values[index] == _placeholders[index]
+          ? ""
           : _values[index];
     });
   }
@@ -102,148 +124,243 @@ class _HabitSetupState extends State<HabitSetup> {
     bool goNext = false,
     bool goBack = false,
   }) {
-    if (_editingIndex == null) return;
-    final idx = _editingIndex!;
-    final text = suggestion ?? _inputController.text.trim();
-    setState(() {
-      if (text.isNotEmpty) _values[idx] = text;
-      if (goNext && idx < 2) {
-        _startEdit(idx + 1);
-      } else if (goBack && idx > 0) {
-        _startEdit(idx - 1);
-      } else if (!goNext && !goBack && idx == 2) {
-        FocusScope.of(context).unfocus();
-      }
-    });
-  }
-
-  void _finalizeAndContinue() {
     if (_editingIndex != null) {
-      final idx = _editingIndex!;
-      final t = _inputController.text.trim();
-      if (t.isNotEmpty) _values[idx] = t;
+      setState(() {
+        _values[_editingIndex!] = (suggestion ?? _inputController.text).isEmpty
+            ? _placeholders[_editingIndex!]
+            : (suggestion ?? _inputController.text);
+        if (goNext && _editingIndex! < 2) {
+          _editingIndex = _editingIndex! + 1;
+          _inputController.text =
+              _values[_editingIndex!] == _placeholders[_editingIndex!]
+              ? ""
+              : _values[_editingIndex!];
+        } else if (goBack && _editingIndex! > 0) {
+          _editingIndex = _editingIndex! - 1;
+          _inputController.text =
+              _values[_editingIndex!] == _placeholders[_editingIndex!]
+              ? ""
+              : _values[_editingIndex!];
+        } else {
+          _editingIndex = null;
+          _inputController.clear();
+        }
+      });
     }
-    setState(() => _editingIndex = null);
-    FocusScope.of(context).unfocus();
-    _continueToReminders();
   }
 
   Widget _buildIntroSentence() {
-    final cs = Theme.of(context).colorScheme;
-    return Expanded(
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        transitionBuilder: (child, anim) {
-          final offsetAnim = Tween<Offset>(
-            begin: Offset(_introForward ? 0.3 : -0.3, 0),
-            end: Offset.zero,
-          ).animate(CurveTween(curve: Curves.easeOut).animate(anim));
-          return ClipRect(
-            child: SlideTransition(
-              position: offsetAnim,
-              child: FadeTransition(opacity: anim, child: child),
+    final normal = Theme.of(context).colorScheme.onSurface;
+    final primary = Theme.of(context).colorScheme.primary;
+    TextStyle titleStyle = GoogleFonts.gabarito(
+      fontSize: 26,
+      fontWeight: FontWeight.bold,
+      color: normal,
+    );
+    TextStyle descStyle = GoogleFonts.gabarito(
+      fontSize: 16,
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+    );
+    TextStyle normalStyle = GoogleFonts.gabarito(fontSize: 18, color: normal);
+    TextStyle underlineStyle = normalStyle.copyWith(
+      decoration: TextDecoration.underline,
+      decorationColor: primary,
+      decorationThickness: 2,
+      decorationStyle: TextDecorationStyle.wavy,
+    );
+
+    const titles = ["Define your habit", "Get specific", "Goal"];
+    const descriptions = [
+      "A habit is a regular practice that is small and easy. It makes a big difference in your life in the long term.",
+      "Set a time and place so that you don't just sit around and wait for motivation to hit you.",
+      "The best form of motivation is always knowing your goal.",
+    ];
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 320),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) {
+        final pos =
+            Tween<Offset>(
+              begin: _introForward
+                  ? const Offset(0.15, 0)
+                  : const Offset(-0.15, 0),
+              end: Offset.zero,
+            ).animate(
+              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+            );
+        final scale = Tween<double>(
+          begin: 0.98,
+          end: 1,
+        ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut));
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: pos,
+            child: ScaleTransition(scale: scale, child: child),
+          ),
+        );
+      },
+      child: Padding(
+        key: ValueKey<int>(_introPage),
+        padding: const EdgeInsets.only(bottom: 0, left: 24, right: 24, top: 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              titles[_introPage],
+              style: titleStyle,
+              textAlign: TextAlign.left,
             ),
-          );
-        },
-        child: Padding(
-          key: ValueKey(_introPage),
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: Text(
-              [
-                "Let's craft a powerful habit statement.",
-                "You'll fill in 3 quick pieces.",
-                "Then we'll set a reminder.",
-              ][_introPage],
-              style: GoogleFonts.gabarito(
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-                color: cs.onSurface,
+            const SizedBox(height: 6),
+            Text(
+              descriptions[_introPage],
+              style: descStyle,
+              textAlign: TextAlign.left,
+            ),
+            const SizedBox(height: 18),
+            Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+              child: Center(
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text("I will ", style: normalStyle),
+                    AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      style: _introPage == 0 ? underlineStyle : normalStyle,
+                      child: const Text("exercise"),
+                    ),
+                    Text(", ", style: normalStyle),
+                    AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      style: _introPage == 1 ? underlineStyle : normalStyle,
+                      child: const Text("when I wake up"),
+                    ),
+                    Text(" so that I can become a ", style: normalStyle),
+                    AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      style: _introPage == 2 ? underlineStyle : normalStyle,
+                      child: const Text("a stronger person"),
+                    ),
+                  ],
+                ),
               ),
             ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIntroSuggestions() {
+    final normal = Theme.of(context).colorScheme.onSurface;
+    final suggestions = [
+      habitSuggestions,
+      cueSuggestions,
+      goalSuggestions,
+    ][_introPage];
+
+    return SizedBox(
+      height: 120,
+      child: ListView.builder(
+        controller: _scrollController,
+        itemCount: suggestions.length,
+        itemBuilder: (context, idx) => ListTile(
+          dense: true,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 0,
           ),
+          minVerticalPadding: 0,
+          title: Text(
+            suggestions[idx],
+            style: GoogleFonts.gabarito(fontSize: 16, color: normal),
+          ),
+          onTap: () {
+            _scrollController.animateTo(
+              0,
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.easeInOut,
+            );
+          },
         ),
       ),
     );
   }
 
   Widget _buildEditableSentence() {
-    final cs = Theme.of(context).colorScheme;
-    TextStyle base = GoogleFonts.gabarito(
-      fontSize: 22,
-      fontWeight: FontWeight.w500,
-      color: cs.onSurface,
-    );
-    TextStyle underline = base.copyWith(
+    final normal = Theme.of(context).colorScheme.onSurface;
+    final primary = Theme.of(context).colorScheme.primary;
+    final faded = Theme.of(context).colorScheme.onSurface.withOpacity(0.5);
+
+    TextStyle normalStyle = GoogleFonts.gabarito(fontSize: 20, color: normal);
+    TextStyle underlineStyle = normalStyle.copyWith(
       decoration: TextDecoration.underline,
-      decorationColor: cs.primary,
-      fontWeight: FontWeight.w700,
+      decorationColor: primary,
+      decorationThickness: 2,
+      decorationStyle: TextDecorationStyle.wavy,
     );
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
+    TextStyle fadedUnderlineStyle = normalStyle.copyWith(
+      color: faded,
+      decoration: TextDecoration.underline,
+      decorationColor: primary,
+      decorationThickness: 2,
+      decorationStyle: TextDecorationStyle.wavy,
+    );
+
+    return Center(
       child: Wrap(
-        alignment: WrapAlignment.start,
-        runSpacing: 8,
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          Text("I will ", style: normalStyle),
           GestureDetector(
             onTap: () => _startEdit(0),
-            child: Text(_values[0], style: underline),
+            child: Text(
+              _values[0],
+              style: _editingIndex == 0 ? fadedUnderlineStyle : underlineStyle,
+            ),
           ),
-          Text(' at ', style: base),
+          Text(", ", style: normalStyle),
           GestureDetector(
             onTap: () => _startEdit(1),
-            child: Text(_values[1], style: underline),
+            child: Text(
+              _values[1],
+              style: _editingIndex == 1 ? fadedUnderlineStyle : underlineStyle,
+            ),
           ),
-          Text(' so that I can become ', style: base),
+          Text(" so that I can become ", style: normalStyle),
           GestureDetector(
             onTap: () => _startEdit(2),
-            child: Text(_values[2], style: underline),
+            child: Text(
+              _values[2],
+              style: _editingIndex == 2 ? fadedUnderlineStyle : underlineStyle,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildEditSuggestions() {
-    if (_editingIndex == null) return const SizedBox.shrink();
-    final list = [
-      habitSuggestions,
-      cueSuggestions,
-      goalSuggestions,
-    ][_editingIndex!];
-    if (list.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: list
-            .map(
-              (s) => ListTile(
-                dense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                title: Text(
-                  s,
-                  style: GoogleFonts.gabarito(
-                    fontSize: 16,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-                onTap: () => _saveEdit(s, goNext: _editingIndex != 2),
-              ),
-            )
-            .toList(),
-      ),
-    );
-  }
-
   Widget _buildEditInput() {
     if (_editingIndex == null) return const SizedBox.shrink();
-    final label = ['habit', 'time/location', 'type of person I want to be'];
+    final label = ["habit", "time/location", "type of person I want to be"];
+    final cs = Theme.of(context).colorScheme;
     return SafeArea(
       top: false,
       child: Container(
-        color: Theme.of(context).colorScheme.surface,
+        color: cs.surface,
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -252,23 +369,13 @@ class _HabitSetupState extends State<HabitSetup> {
               controller: _inputController,
               autofocus: true,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-              cursorColor: Theme.of(context).colorScheme.primary,
-              onSubmitted: (_) {
-                if (_editingIndex == 2 && _isComplete) {
-                  _finalizeAndContinue();
-                } else {
-                  _saveEdit(null, goNext: true);
-                }
-              },
+              style: TextStyle(color: cs.onSurface),
+              cursorColor: cs.primary,
+              onSubmitted: (_) => _saveEdit(null),
               decoration: InputDecoration(
                 hintText: "Enter your ${label[_editingIndex!]}",
-                hintStyle: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                hintStyle: TextStyle(color: cs.onSurfaceVariant),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
             const SizedBox(height: 8),
@@ -277,22 +384,14 @@ class _HabitSetupState extends State<HabitSetup> {
               children: [
                 IconButton(
                   icon: const Icon(Icons.arrow_back_rounded),
-                  tooltip: 'Back',
-                  onPressed: _editingIndex == 0
-                      ? null
-                      : () => _saveEdit(null, goBack: true),
+                  color: cs.onSurface,
+                  onPressed: _editingIndex == 0 ? null : () => _saveEdit(null, goBack: true),
                 ),
-                if (_editingIndex == 2)
-                  FilledButton(
-                    onPressed: _isComplete ? _finalizeAndContinue : null,
-                    child: const Text('Continue'),
-                  )
-                else
-                  IconButton(
-                    icon: const Icon(Icons.arrow_forward_rounded),
-                    tooltip: 'Next',
-                    onPressed: () => _saveEdit(null, goNext: true),
-                  ),
+                IconButton(
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  color: cs.onSurface,
+                  onPressed: _editingIndex == 2 ? null : () => _saveEdit(null, goNext: true),
+                ),
               ],
             ),
           ],
@@ -302,8 +401,10 @@ class _HabitSetupState extends State<HabitSetup> {
   }
 
   String get _editTitle {
-    if (_editingIndex == null) return 'Add a habit';
-    return ['What habit?', 'When/where?', 'Goal identity'][_editingIndex!];
+    if (_editingIndex == 0) return "Define your habit";
+    if (_editingIndex == 1) return "Get specific";
+    if (_editingIndex == 2) return "Goal";
+    return "Add a habit";
   }
 
   @override
@@ -328,13 +429,13 @@ class _HabitSetupState extends State<HabitSetup> {
                         if (_introPage > 0)
                           TextButton(
                             onPressed: _backIntro,
-                            child: const Text('Back'),
+                            child: const Text("Back"),
                           )
                         else
                           const SizedBox(width: 60),
                         FilledButton(
                           onPressed: _nextIntro,
-                          child: Text(_introPage < 2 ? 'Next' : 'Continue'),
+                          child: Text(_introPage < 2 ? "Next" : "Continue"),
                         ),
                       ],
                     ),
@@ -349,7 +450,7 @@ class _HabitSetupState extends State<HabitSetup> {
                       padding: const EdgeInsets.only(bottom: 24),
                       child: Padding(
                         padding: const EdgeInsets.only(
-                          top: 32,
+                          top: 32.0,
                           left: 24,
                           right: 24,
                         ),
@@ -357,7 +458,9 @@ class _HabitSetupState extends State<HabitSetup> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _editTitle,
+                              _editingIndex == null
+                                  ? "Add a habit"
+                                  : _editTitle,
                               style: GoogleFonts.gabarito(
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold,
@@ -373,7 +476,7 @@ class _HabitSetupState extends State<HabitSetup> {
                       ),
                     ),
                   ),
-                  if (_isComplete && _editingIndex == null)
+                  if (_isComplete)
                     SafeArea(
                       top: false,
                       child: Padding(
@@ -381,7 +484,9 @@ class _HabitSetupState extends State<HabitSetup> {
                         child: SizedBox(
                           width: double.infinity,
                           child: FilledButton(
-                            onPressed: _continueToReminders,
+                            onPressed: _isComplete
+                                ? _continueToReminders
+                                : null,
                             child: const Text('Continue'),
                           ),
                         ),
@@ -390,6 +495,68 @@ class _HabitSetupState extends State<HabitSetup> {
                   _buildEditInput(),
                 ],
               ),
+      ),
+    );
+  }
+
+  Widget _buildEditSuggestions() {
+    if (_editingIndex == null) return const SizedBox.shrink();
+    final normal = Theme.of(context).colorScheme.onSurface;
+    final suggestions = [
+      habitSuggestions,
+      cueSuggestions,
+      goalSuggestions,
+    ][_editingIndex!];
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 24.0, left: 0, right: 0),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12.0),
+          color: Theme.of(context).colorScheme.primaryContainer,
+        ),
+        child: Column(
+          // i want to change background color of this Column and columns DO NOT support decoration:.
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6.0,
+                vertical: 12.0,
+              ),
+              child: Text(
+                "Choose one below or enter your own",
+                style: GoogleFonts.gabarito(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            ),
+            ...suggestions.map((suggestion) {
+              return ListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 0,
+                ),
+                minVerticalPadding: 0,
+                title: Text(
+                  suggestion,
+                  style: GoogleFonts.gabarito(fontSize: 16, color: normal),
+                ),
+                onTap: () {
+                  _saveEdit(suggestion, goNext: true);
+                  _scrollController.animateTo(
+                    0,
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeInOut,
+                  );
+                },
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
