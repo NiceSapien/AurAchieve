@@ -4,7 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'api_service.dart';
 import 'screens/habit_setup.dart';
 import 'dart:async';
-import 'package:vector_math/vector_math_64.dart' as vector;
 import 'widgets/dynamic_color_svg.dart' as dynamic_color_svg;
 
 class HabitsPage extends StatefulWidget {
@@ -27,6 +26,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   late AnimationController _bounceController;
   late Animation<double> _bounceScale;
   int? _completedIndex;
+  bool _holdTriggered = false;
 
   @override
   void initState() {
@@ -38,6 +38,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
       ..addStatusListener((s) {
         if (s == AnimationStatus.completed && _holdingIndex != null) {
           final idx = _holdingIndex!;
+          _holdTriggered = true;
           final h = _habits[idx];
           final id = (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '').toString();
           if (id.isNotEmpty) _incrementCompleted(id, idx);
@@ -47,55 +48,54 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     _bounceController =
         AnimationController(
           vsync: this,
-          duration: const Duration(milliseconds: 900),
-        )..addStatusListener((status) {
-          if (status == AnimationStatus.completed && mounted) {
+          duration: const Duration(milliseconds: 850),
+        )..addStatusListener((s) {
+          if (s == AnimationStatus.completed && mounted)
             setState(() => _completedIndex = null);
-          }
         });
     _bounceScale = _bounceController.drive(
       TweenSequence<double>([
         TweenSequenceItem(
           tween: Tween(
             begin: 0.0,
-            end: -0.06,
-          ).chain(CurveTween(curve: Curves.easeIn)),
-          weight: 10,
-        ),
-        TweenSequenceItem(
-          tween: Tween(
-            begin: -0.06,
-            end: 0.18,
+            end: 0.28,
           ).chain(CurveTween(curve: Curves.easeOut)),
-          weight: 22,
+          weight: 20,
         ),
         TweenSequenceItem(
           tween: Tween(
-            begin: 0.18,
-            end: -0.03,
-          ).chain(CurveTween(curve: Curves.easeInOut)),
+            begin: 0.28,
+            end: -0.12,
+          ).chain(CurveTween(curve: Curves.easeIn)),
           weight: 14,
         ),
         TweenSequenceItem(
           tween: Tween(
-            begin: -0.03,
-            end: 0.08,
-          ).chain(CurveTween(curve: Curves.easeInOut)),
+            begin: -0.12,
+            end: 0.1,
+          ).chain(CurveTween(curve: Curves.easeOut)),
           weight: 12,
         ),
         TweenSequenceItem(
           tween: Tween(
-            begin: 0.08,
-            end: -0.015,
+            begin: 0.1,
+            end: -0.04,
           ).chain(CurveTween(curve: Curves.easeInOut)),
           weight: 10,
         ),
         TweenSequenceItem(
           tween: Tween(
-            begin: -0.015,
+            begin: -0.04,
+            end: 0.02,
+          ).chain(CurveTween(curve: Curves.easeInOut)),
+          weight: 8,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: 0.02,
             end: 0.0,
           ).chain(CurveTween(curve: Curves.easeOut)),
-          weight: 8,
+          weight: 6,
         ),
       ]),
     );
@@ -123,6 +123,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   void _startHoldAnimation(int index) {
     final c = _holdController;
     if (c == null) return;
+    _holdTriggered = false;
     setState(() => _holdingIndex = index);
     c.forward(from: 0);
   }
@@ -139,19 +140,17 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         final localRem = id != null
             ? await widget.apiService.getHabitReminderLocal(id.toString())
             : null;
-        if (localRem != null && localRem.isNotEmpty) {
+        if (localRem != null && localRem.isNotEmpty)
           m['habitReminder'] = localRem;
-        }
         m['completedTimes'] = m['completedTimes'] ?? 0;
         normalized.add(m);
       }
       if (mounted) setState(() => _habits = normalized);
     } catch (e) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to load habits: $e')));
-      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -228,31 +227,24 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   Future<void> _incrementCompleted(String habitId, int index) async {
     if (_updating) return;
     _updating = true;
-    final previousCount = _habits[index]['completedTimes'] as int? ?? 0;
+    final prev = _habits[index]['completedTimes'] as int? ?? 0;
     setState(() {
-      _habits[index]['completedTimes'] = previousCount + 1;
+      _habits[index]['completedTimes'] = prev + 1;
       _completedIndex = index;
     });
     _bounceController.forward(from: 0);
     try {
       await widget.apiService.incrementHabitCompletedTimes(habitId);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          duration: Duration(milliseconds: 1200),
-          content: Text('Habit marked as complete'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _habits[index]['completedTimes'] = previousCount;
-        _completedIndex = null;
-      });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+      if (mounted) {
+        setState(() {
+          _habits[index]['completedTimes'] = prev;
+          _completedIndex = null;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+      }
     } finally {
       _updating = false;
     }
@@ -282,6 +274,262 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     return null;
   }
 
+  void _showHabitDetails(Map<String, dynamic> habit) {
+    final cs = Theme.of(context).colorScheme;
+    final now = DateTime.now();
+    final sampleCompleted = {
+      DateTime(now.year, now.month, now.day - 1).day,
+      DateTime(now.year, now.month, now.day - 3).day,
+      DateTime(now.year, now.month, now.day - 4).day,
+      DateTime(now.year, now.month, now.day - 7).day,
+    };
+    final daysInMonth = DateUtils.getDaysInMonth(now.year, now.month);
+    final addedDate =
+        _parseHabitDate(habit) ?? now.subtract(const Duration(days: 11));
+    final addedStr =
+        '${addedDate.year}-${addedDate.month.toString().padLeft(2, '0')}-${addedDate.day.toString().padLeft(2, '0')}';
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _habitSentence(habit, cs),
+                const SizedBox(height: 18),
+                Text(
+                  'Calendar',
+                  style: GoogleFonts.gabarito(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: List.generate(daysInMonth, (i) {
+                    final day = i + 1;
+                    final completed = sampleCompleted.contains(day);
+                    return Container(
+                      width: 34,
+                      height: 34,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: completed
+                            ? cs.primaryContainer
+                            : cs.surfaceVariant.withOpacity(0.4),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '$day',
+                        style: GoogleFonts.gabarito(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: completed
+                              ? cs.onPrimaryContainer
+                              : cs.onSurfaceVariant,
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _metricBox(
+                        title: 'Streak',
+                        value: '4 days',
+                        icon: Icons.local_fire_department_rounded,
+                        cs: cs,
+                        iconColor: cs.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _metricBox(
+                        title: 'Consistency',
+                        value: '73%',
+                        icon: Icons.insights_rounded,
+                        cs: cs,
+                        iconColor: cs.tertiary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _metricBox(
+                  title: 'Reminder',
+                  value: _formatReminder(habit),
+                  icon: Icons.alarm_rounded,
+                  cs: cs,
+                  iconColor: cs.secondary,
+                ),
+                const SizedBox(height: 12),
+                _metricBox(
+                  title: 'Added',
+                  value: addedStr,
+                  icon: Icons.event_available_rounded,
+                  cs: cs,
+                  iconColor: cs.primary,
+                ),
+                const SizedBox(height: 28),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.tonal(
+                        onPressed: () {},
+                        style: FilledButton.styleFrom(
+                          foregroundColor: cs.error,
+                          backgroundColor: cs.errorContainer,
+                        ),
+                        child: const Text('Delete'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {},
+                        child: const Text('Edit'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  DateTime? _parseHabitDate(Map<String, dynamic> habit) {
+    final candidates = [
+      habit['createdAt'],
+      habit['created_at'],
+      habit['timestamp'],
+      habit['created'],
+    ];
+    for (final c in candidates) {
+      if (c is DateTime) return c;
+      if (c is String) {
+        try {
+          return DateTime.parse(c);
+        } catch (_) {}
+      }
+    }
+    return null;
+  }
+
+  Widget _habitSentence(Map<String, dynamic> habit, ColorScheme cs) {
+    final habitName = (habit['habitName'] ?? habit['habit'] ?? 'habit')
+        .toString();
+    final cue =
+        (habit['habitLocation'] ??
+                habit['habitCue'] ??
+                habit['location'] ??
+                'time/place')
+            .toString();
+    final goal = (habit['habitGoal'] ?? habit['goal'] ?? 'better person')
+        .toString();
+    TextStyle base = GoogleFonts.gabarito(
+      fontSize: 22,
+      fontWeight: FontWeight.w500,
+      color: cs.onSurface,
+    );
+    TextStyle emph = base.copyWith(
+      decoration: TextDecoration.underline,
+      decorationColor: cs.primary,
+      decorationStyle: TextDecorationStyle.wavy,
+      decorationThickness: 2,
+      fontWeight: FontWeight.w700,
+      color: cs.onSurface,
+    );
+    return RichText(
+      text: TextSpan(
+        style: base,
+        children: [
+          const TextSpan(text: 'I will '),
+          TextSpan(text: habitName, style: emph),
+          const TextSpan(text: ', '),
+          TextSpan(text: cue, style: emph),
+          const TextSpan(text: ' so that I can become '),
+          TextSpan(text: goal, style: emph),
+        ],
+      ),
+    );
+  }
+
+  Widget _metricBox({
+    required String title,
+    required String value,
+    required IconData icon,
+    required ColorScheme cs,
+    required Color iconColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: iconColor.withOpacity(0.14),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 22, color: iconColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.gabarito(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: GoogleFonts.gabarito(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatReminder(Map<String, dynamic> habit) {
+    final rem = habit['habitReminder'];
+    if (rem is List && rem.isNotEmpty) {
+      return rem.take(3).join(', ') + (rem.length > 3 ? ' +' : '');
+    }
+    return 'None';
+  }
+
   Widget _habitCard(Map<String, dynamic> h, int index, ColorScheme scheme) {
     final c = _holdController;
     final holding = _holdingIndex == index && c != null;
@@ -298,14 +546,12 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     final shape = _shapeForIndex(index);
     final showReminder = _hasReminderToday(reminders);
     final reminderTime = showReminder ? _todayReminderTime(reminders) : null;
-
     return AnimatedBuilder(
       animation: _bounceController,
       builder: (context, child) {
         double scale = 1.0;
-        if (_completedIndex != null && index == _completedIndex) {
+        if (_completedIndex != null && index == _completedIndex)
           scale = 1.0 + _bounceScale.value;
-        }
         if (holding) scale *= (1 - (progress * 0.04));
         return Transform.scale(scale: scale, child: child);
       },
@@ -316,9 +562,8 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
           _pressStartPosition = event.position;
           _pressDelayTimer?.cancel();
           _pressDelayTimer = Timer(const Duration(milliseconds: 50), () {
-            if (_pressStartPosition != null && _holdingIndex == null) {
+            if (_pressStartPosition != null && _holdingIndex == null)
               _startHoldAnimation(index);
-            }
           });
         },
         onPointerMove: (event) {
@@ -332,13 +577,16 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
             }
           }
         },
-        onPointerUp: (_) => _resetHold(),
+        onPointerUp: (_) {
+          final wasHold = _holdTriggered;
+          _resetHold();
+          if (!wasHold) _showHabitDetails(h);
+        },
         onPointerCancel: (_) => _resetHold(),
         child: Material(
           clipBehavior: Clip.antiAlias,
           color: colorPair.bg,
           elevation: 3,
-          shadowColor: scheme.shadow.withOpacity(0.25),
           shape: shape,
           child: Stack(
             children: [
@@ -387,7 +635,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                       ),
                       const Spacer(),
                       Text(
-                        'to become a',
+                        'to become',
                         textAlign: TextAlign.center,
                         style: GoogleFonts.gabarito(
                           fontSize: 12,
@@ -419,7 +667,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                         ),
                       ),
                       const Spacer(),
-                      if (reminderTime != null) ...[
+                      if (reminderTime != null)
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
@@ -439,8 +687,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 4),
-                      ],
+                      if (reminderTime != null) const SizedBox(height: 4),
                       Text(
                         'Completed: ${h['completedTimes']}',
                         textAlign: TextAlign.center,

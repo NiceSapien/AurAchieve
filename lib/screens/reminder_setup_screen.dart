@@ -47,7 +47,6 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
               ?.requestPermissions(alert: true, badge: true, sound: true) ??
           false;
     } else if (Platform.isAndroid) {
-      // On Android, permissions are handled by the system or manifest.
       return true;
     }
     return false;
@@ -137,27 +136,23 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
         habitGoal: widget.habitGoal,
         habitLocation: widget.habitCue,
       );
-
-      String habitId =
+      final habitId =
           created[r'$id'] ?? created['id'] ?? created['habitId'] ?? '';
-      if (_selectedTime != null && habitId.isNotEmpty) {
+      final hasTime = _selectedTime != null;
+      final hasDay = _selectedDays.any((d) => d);
+      if (habitId.isNotEmpty && hasTime && hasDay) {
         final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
         final timeStr = _selectedTime!.format(context);
         final selected = <String>[];
-        if (_selectedDays.any((d) => d)) {
-          for (int i = 0; i < _selectedDays.length; i++) {
-            if (_selectedDays[i]) selected.add('${days[i]} $timeStr');
-          }
-        } else {
-          selected.add('Daily $timeStr');
+        for (int i = 0; i < _selectedDays.length; i++) {
+          if (_selectedDays[i]) selected.add('${days[i]} $timeStr');
         }
         await widget.apiService.saveHabitReminderLocal(habitId, selected);
         await _scheduleNotification();
       }
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Habit saved successfully!')),
+          const SnackBar(content: Text('Habit saved successfully')),
         );
         Navigator.pop(context, true);
       }
@@ -168,9 +163,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
         ).showSnackBar(SnackBar(content: Text('Error saving habit: $e')));
       }
     } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
-      }
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -178,11 +171,12 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
   Widget build(BuildContext context) {
     final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final onSurface = Theme.of(context).colorScheme.onSurface;
-
+    final canSaveReminder =
+        _selectedTime != null && _selectedDays.any((d) => d);
     return Scaffold(
       appBar: AppBar(title: const Text('Set a Reminder')),
       body: Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -207,7 +201,9 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
                 if (!hasPermissions && mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Notification permissions are required to set reminders.'),
+                      content: Text(
+                        'Notification permissions are required to set reminders.',
+                      ),
                     ),
                   );
                   return;
@@ -275,8 +271,12 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton(
-                      onPressed: _isSaving ? null : _saveHabitAndReminder,
-                      child: Text(_isSaving ? 'Saving...' : 'Save Habit & Reminder'),
+                      onPressed: _isSaving || !canSaveReminder
+                          ? null
+                          : _saveHabitAndReminder,
+                      child: Text(
+                        _isSaving ? 'Saving...' : 'Save Habit & Reminder',
+                      ),
                     ),
                   ),
                   SizedBox(
@@ -286,6 +286,9 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
                           ? null
                           : () {
                               _selectedTime = null;
+                              for (int i = 0; i < _selectedDays.length; i++) {
+                                _selectedDays[i] = false;
+                              }
                               _saveHabitAndReminder();
                             },
                       child: const Text('Save without reminder'),

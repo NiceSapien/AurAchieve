@@ -17,8 +17,8 @@ class HabitSetup extends StatefulWidget {
 }
 
 class _HabitSetupState extends State<HabitSetup> {
-  int _introPage = 0; // 0, 1, 2 for intro, 3 for edit
-  int? _editingIndex; // null if not editing, 0/1/2 for which part
+  int _introPage = 0;
+  int? _editingIndex;
   final List<String> _values = [
     "habit",
     "time/location",
@@ -72,9 +72,9 @@ class _HabitSetupState extends State<HabitSetup> {
     );
   }
 
-  void _continueToReminders() {
+  void _continueToReminders() async {
     if (!_isComplete) return;
-    Navigator.push(
+    final result = await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ReminderSetupScreen(
@@ -85,6 +85,7 @@ class _HabitSetupState extends State<HabitSetup> {
         ),
       ),
     );
+    if (result == true && mounted) Navigator.pop(context, true);
   }
 
   @override
@@ -375,7 +376,9 @@ class _HabitSetupState extends State<HabitSetup> {
               decoration: InputDecoration(
                 hintText: "Enter your ${label[_editingIndex!]}",
                 hintStyle: TextStyle(color: cs.onSurfaceVariant),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -385,12 +388,16 @@ class _HabitSetupState extends State<HabitSetup> {
                 IconButton(
                   icon: const Icon(Icons.arrow_back_rounded),
                   color: cs.onSurface,
-                  onPressed: _editingIndex == 0 ? null : () => _saveEdit(null, goBack: true),
+                  onPressed: _editingIndex == 0
+                      ? null
+                      : () => _saveEdit(null, goBack: true),
                 ),
                 IconButton(
                   icon: const Icon(Icons.arrow_forward_rounded),
                   color: cs.onSurface,
-                  onPressed: _editingIndex == 2 ? null : () => _saveEdit(null, goNext: true),
+                  onPressed: _editingIndex == 2
+                      ? null
+                      : () => _saveEdit(null, goNext: true),
                 ),
               ],
             ),
