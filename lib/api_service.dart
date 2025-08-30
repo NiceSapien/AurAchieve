@@ -483,4 +483,16 @@ class ApiService {
     } catch (_) {}
     return null;
   }
+
+  Future<void> deleteHabit(String habitId) async {
+    final headers = await _getHeaders();
+    final res = await http.delete(
+      Uri.parse('$_baseUrl/api/habit'),
+      headers: headers,
+      body: jsonEncode({'habitId': habitId}),
+    );
+    if (res.statusCode != 200 && res.statusCode != 204) {
+      throw Exception('Failed to delete habit: ${res.body}');
+    }
+  }
 }

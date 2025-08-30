@@ -525,37 +525,70 @@ class _HomePageState extends State<HomePage> {
 
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        final textColor = isDark ? Colors.white : Colors.black87;
+      barrierDismissible: true,
+      builder: (dCtx) {
+        final cs = Theme.of(dCtx).colorScheme;
         return AlertDialog(
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          title: Text(
-            'Delete Task?',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(color: textColor),
+          backgroundColor: cs.surfaceContainerHigh,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.delete_outline_rounded, color: cs.error),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Delete task?',
+                  style: GoogleFonts.gabarito(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface,
+                  ),
+                ),
+              ),
+            ],
           ),
           content: Text(
-            'Are you sure you want to delete the task, "${taskToDelete.name}"? This cannot be undone.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: textColor),
+            'This will remove the task permanently. This action cannot be undone.',
+            style: GoogleFonts.gabarito(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              height: 1.3,
+              color: cs.onSurfaceVariant,
+            ),
           ),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
               style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: cs.onSurfaceVariant,
+                textStyle: GoogleFonts.gabarito(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
+              onPressed: () => Navigator.pop(dCtx, false),
               child: const Text('Cancel'),
             ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+            FilledButton.tonal(
               style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error,
-                foregroundColor: Theme.of(context).colorScheme.onError,
+                backgroundColor: cs.errorContainer,
+                foregroundColor: cs.error,
+                textStyle: GoogleFonts.gabarito(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
+              onPressed: () => Navigator.pop(dCtx, true),
               child: const Text('Delete'),
             ),
           ],

@@ -395,6 +395,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
       isScrollControlled: true,
       showDragHandle: true,
       builder: (ctx) {
+        DateTime calMonth = DateTime(now.year, now.month);
         return SafeArea(
           top: false,
           child: SingleChildScrollView(
@@ -404,50 +405,18 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
               children: [
                 _habitSentence(habit, cs),
                 const SizedBox(height: 18),
-                Text(
-                  'History',
-                  style: GoogleFonts.gabarito(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Center(
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: List.generate(daysInMonth, (i) {
-                      final day = i + 1;
-                      final completed = completedDays.any(
-                        (d) =>
-                            d.year == now.year &&
-                            d.month == now.month &&
-                            d.day == day,
-                      );
-                      return Container(
-                        width: 34,
-                        height: 34,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: completed
-                              ? cs.primaryContainer
-                              : cs.surfaceVariant.withOpacity(0.4),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          '$day',
-                          style: GoogleFonts.gabarito(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: completed
-                                ? cs.onPrimaryContainer
-                                : cs.onSurfaceVariant,
-                          ),
-                        ),
-                      );
-                    }),
-                  ),
+                StatefulBuilder(
+                  builder: (calCtx, setCalState) {
+                    return _HabitCalendar(
+                      month: calMonth,
+                      completed: completedSet,
+                      created: createdDate,
+                      onChange: (m) => setCalState(() {
+                        calMonth = DateTime(m.year, m.month);
+                      }),
+                      cs: cs,
+                    );
+                  },
                 ),
                 const SizedBox(height: 20),
                 Row(
@@ -474,13 +443,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                   ],
                 ),
                 const SizedBox(height: 12),
-                _metricBox(
-                  title: 'Reminder',
-                  value: _formatReminder(habit),
-                  icon: Icons.alarm_rounded,
-                  cs: cs,
-                  iconColor: cs.secondary,
-                ),
+                _reminderBox(habit, cs),
                 const SizedBox(height: 12),
                 _metricBox(
                   title: 'Added',
@@ -493,20 +456,157 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                 Row(
                   children: [
                     Expanded(
-                      child: FilledButton.tonal(
-                        onPressed: () {},
-                        style: FilledButton.styleFrom(
-                          foregroundColor: cs.error,
-                          backgroundColor: cs.errorContainer,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final id =
+                              (habit[r'$id'] ?? habit['id'] ?? habit['habitId'] ?? '')
+                                  .toString();
+                          if (id.isEmpty) return;
+                          final confirm = await showDialog<bool>(
+                            context: ctx,
+                            barrierDismissible: true,
+                            builder: (dCtx) {
+                              final cs2 = Theme.of(dCtx).colorScheme;
+                              return AlertDialog(
+                                backgroundColor: cs2.surfaceContainerHigh,
+                                surfaceTintColor: Colors.transparent,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                title: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.delete_outline_rounded,
+                                      color: cs2.error,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        'Delete habit?',
+                                        style: GoogleFonts.gabarito(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w700,
+                                          color: cs2.onSurface,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                content: Text(
+                                  'This will remove the habit and its progress. This action cannot be undone.',
+                                  style: GoogleFonts.gabarito(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    height: 1.3,
+                                    color: cs2.onSurfaceVariant,
+                                  ),
+                                ),
+                                actionsPadding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  0,
+                                  16,
+                                  12,
+                                ),
+                                actions: [
+                                  TextButton(
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: cs2.onSurfaceVariant,
+                                      textStyle: GoogleFonts.gabarito(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    onPressed: () => Navigator.pop(dCtx, false),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  FilledButton.tonal(
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: cs2.errorContainer,
+                                      foregroundColor: cs2.error,
+                                      textStyle: GoogleFonts.gabarito(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 18,
+                                        vertical: 12,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                    ),
+                                    onPressed: () => Navigator.pop(dCtx, true),
+                                    child: const Text('Delete'),
+                                  ),
+                                ],
+                              );
+                            },
+                          );
+                          if (confirm != true) return;
+                          Navigator.of(ctx).pop();
+                          try {
+                            await widget.apiService.deleteHabit(id);
+                            if (mounted) {
+                              setState(() {
+                                _habits.removeWhere(
+                                  (h) =>
+                                      (h[r'$id'] ??
+                                              h['id'] ??
+                                              h['habitId'] ??
+                                              '')
+                                          .toString() ==
+                                      id,
+                                );
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Habit deleted')),
+                              );
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Delete failed: $e')),
+                              );
+                            }
+                          }
+                        },
+                        icon: Icon(
+                          Icons.delete_outline_rounded,
+                          color: cs.error,
                         ),
-                        child: const Text('Delete'),
+                        label: Text(
+                          'Delete',
+                          style: GoogleFonts.gabarito(
+                            fontWeight: FontWeight.w600,
+                            color: cs.error,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: cs.error,
+                          side: BorderSide(
+                            color: cs.error.withOpacity(0.55),
+                            width: 1.2,
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          backgroundColor: cs.error.withOpacity(0.05),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: OutlinedButton(
+                      child: FilledButton.icon(
                         onPressed: () {},
-                        child: const Text('Edit'),
+                        icon: const Icon(Icons.edit_rounded),
+                        label: const Text('Edit'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -521,20 +621,151 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
 
   DateTime? _parseHabitDate(Map<String, dynamic> habit) {
     final candidates = [
+      habit[r'$createdAt'], // Appwrite document field
       habit['createdAt'],
       habit['created_at'],
       habit['timestamp'],
       habit['created'],
+      habit[r'$updatedAt'], // fallback if created missing
     ];
     for (final c in candidates) {
+      if (c == null) continue;
       if (c is DateTime) return c;
-      if (c is String) {
+      if (c is String && c.isNotEmpty) {
         try {
           return DateTime.parse(c);
         } catch (_) {}
       }
     }
     return null;
+  }
+
+  (String time, List<String> days) _parseReminderParts(
+    Map<String, dynamic> habit,
+  ) {
+    final rem = habit['habitReminder'];
+    if (rem is! List || rem.isEmpty) return ('—', const []);
+    final List<String> items = rem.map((e) => e.toString()).toList();
+    final daySet = <String>{};
+    String? time;
+    for (final r in items) {
+      final lower = r.toLowerCase();
+      if (lower.startsWith('daily')) {
+        daySet.addAll(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+        final t = r.replaceFirst(RegExp('[Dd]aily ?'), '').trim();
+        if (t.isNotEmpty) time ??= t;
+        continue;
+      }
+      final parts = r.split(' ');
+      if (parts.length >= 2) {
+        final day = parts.first;
+        final rest = parts.sublist(1).join(' ').trim();
+        if (day.length == 3) daySet.add(day);
+        if (time == null && rest.isNotEmpty) time = rest;
+      }
+    }
+    final orderedDays = [
+      'Mon',
+      'Tue',
+      'Wed',
+      'Thu',
+      'Fri',
+      'Sat',
+      'Sun',
+    ].where(daySet.contains).toList();
+    return (time ?? '—', orderedDays);
+  }
+
+  Widget _reminderBox(Map<String, dynamic> habit, ColorScheme cs) {
+    final (time, days) = _parseReminderParts(habit);
+    if (days.isEmpty && time == '—') {
+      return _metricBox(
+        title: 'Reminder',
+        value: 'None',
+        icon: Icons.alarm_rounded,
+        cs: cs,
+        iconColor: cs.secondary,
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: cs.secondary.withOpacity(0.14),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.alarm_rounded, size: 22, color: cs.secondary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Reminder',
+                  style: GoogleFonts.gabarito(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  time,
+                  style: GoogleFonts.gabarito(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: days.map((d) {
+                    final active = true;
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: (active ? cs.secondary : cs.surfaceVariant)
+                            .withOpacity(active ? 0.22 : 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: cs.secondary.withOpacity(0.30),
+                          width: 1,
+                        ),
+                      ),
+                      child: Text(
+                        d,
+                        style: GoogleFonts.gabarito(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.3,
+                          color: cs.onSurface,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _habitSentence(Map<String, dynamic> habit, ColorScheme cs) {
@@ -631,20 +862,22 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     );
   }
 
-  String _formatReminder(Map<String, dynamic> habit) {
-    final rem = habit['habitReminder'];
-    if (rem is List && rem.isNotEmpty) {
-      return rem.take(3).join(', ') + (rem.length > 3 ? ' +' : '');
-    }
-    return 'None';
-  }
-
   String _formatDate(DateTime date) {
-    final now = DateTime.now();
-    if (date.year == now.year && date.month == now.month) {
-      return '${date.day} ${_monthName(date.month)}';
-    }
-    return '${date.day} ${_monthName(date.month)} ${date.year}';
+    const full = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return '${date.day} ${full[date.month - 1]}, ${date.year}';
   }
 
   String _monthName(int month) {
@@ -920,5 +1153,122 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         label: const Text('Add Habit'),
       ),
     );
+  }
+}
+
+class _HabitCalendar extends StatelessWidget {
+  final DateTime month;
+  final Set<DateTime> completed;
+  final DateTime created;
+  final void Function(DateTime) onChange;
+  final ColorScheme cs;
+  const _HabitCalendar({required this.month, required this.completed, required this.created, required this.onChange, required this.cs});
+  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+  bool _sameDay(DateTime a, DateTime b) => a.year == b.year && a.month == b.month && a.day == b.day;
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final startLimit = DateTime(created.year, created.month);
+    final endLimit = DateTime(now.year, now.month);
+    final daysInMonth = DateUtils.getDaysInMonth(month.year, month.month);
+    final firstWeekday = DateTime(month.year, month.month, 1).weekday;
+    final leading = (firstWeekday + 6) % 7;
+    final cells = <Widget>[];
+    for (int i = 0; i < leading; i++) {
+      cells.add(const SizedBox());
+    }
+    for (int d = 1; d <= daysInMonth; d++) {
+      final date = DateTime(month.year, month.month, d);
+      final done = completed.any((c) => _sameDay(c, date));
+      final today = _sameDay(date, now);
+      Color bg;
+      Color fg;
+      if (today) {
+        bg = cs.primary;
+        fg = cs.onPrimary;
+      } else if (done) {
+        bg = cs.primaryContainer;
+        fg = cs.onPrimaryContainer;
+      } else {
+        bg = cs.surfaceVariant.withOpacity(0.35);
+        fg = cs.onSurfaceVariant;
+      }
+      cells.add(Container(
+        margin: const EdgeInsets.all(2),
+        width: 40,
+        height: 40,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          '$d',
+          style: GoogleFonts.gabarito(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: fg,
+          ),
+        ),
+      ));
+    }
+    final rows = (cells.length / 7).ceil();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Row(
+          children: [
+            IconButton(
+              onPressed: month.isAfter(startLimit) ? () => onChange(DateTime(month.year, month.month - 1)) : null,
+              icon: const Icon(Icons.chevron_left_rounded),
+              color: month.isAfter(startLimit) ? cs.onSurfaceVariant : cs.onSurfaceVariant.withOpacity(0.25),
+            ),
+            Expanded(
+              child: Center(
+                child: Text(
+                  '${_monthNameFull(month.month)} ${month.year}',
+                  style: GoogleFonts.gabarito(fontSize: 16, fontWeight: FontWeight.w700, color: cs.onSurface),
+                ),
+              ),
+            ),
+            IconButton(
+              onPressed: month.isBefore(endLimit) ? () => onChange(DateTime(month.year, month.month + 1)) : null,
+              icon: const Icon(Icons.chevron_right_rounded),
+              color: month.isBefore(endLimit) ? cs.onSurfaceVariant : cs.onSurfaceVariant.withOpacity(0.25),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => Expanded(
+            child: Center(
+              child: Text(
+                d,
+                style: GoogleFonts.gabarito(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurfaceVariant),
+              ),
+            ),
+          )).toList(),
+        ),
+        const SizedBox(height: 4),
+        Column(
+          children: List.generate(rows, (r) {
+            return Row(
+              children: List.generate(7, (c) {
+                final idx = r * 7 + c;
+                if (idx < cells.length) {
+                  return Expanded(child: SizedBox(height: 44, child: Center(child: cells[idx])));
+                }
+                return const Expanded(child: SizedBox(height: 44));
+              }),
+            );
+          }),
+        ),
+      ],
+    );
+  }
+  String _monthNameFull(int m) {
+    const full = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return full[m - 1];
   }
 }
