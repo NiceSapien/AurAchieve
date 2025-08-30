@@ -135,6 +135,8 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
         habitName: widget.habitName,
         habitGoal: widget.habitGoal,
         habitLocation: widget.habitCue,
+        createdAt: DateTime.now(),
+        completedDays: [],
       );
       final habitId =
           created[r'$id'] ?? created['id'] ?? created['habitId'] ?? '';

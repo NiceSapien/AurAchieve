@@ -135,6 +135,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     try {
       final list = await widget.apiService.getHabits();
       final normalized = <Map<String, dynamic>>[];
+      // In _loadHabits(), ensure completedDays stays a List<String>
       for (final h in list) {
         if (h is! Map) continue;
         final m = Map<String, dynamic>.from(h);
@@ -145,6 +146,13 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         if (localRem != null && localRem.isNotEmpty)
           m['habitReminder'] = localRem;
         m['completedTimes'] = m['completedTimes'] ?? 0;
+        if (m['completedDays'] is List) {
+          m['completedDays'] = List<String>.from(
+            (m['completedDays'] as List).map((e) => e.toString()),
+          );
+        } else {
+          m['completedDays'] = <String>[];
+        }
         normalized.add(m);
       }
       if (mounted) setState(() => _habits = normalized);
@@ -226,21 +234,51 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     }
   }
 
+  // Replace _incrementCompleted with:
   Future<void> _incrementCompleted(String habitId, int index) async {
     if (_updating) return;
     _updating = true;
-    final prev = _habits[index]['completedTimes'] as int? ?? 0;
+    final habit = _habits[index];
+    final prevCount = habit['completedTimes'] as int? ?? 0;
+    final prevDays = List<String>.from(
+      (habit['completedDays'] as List?)?.map((e) => e.toString()) ??
+          const <String>[],
+    );
+    final todayKey = DateTime.now().toUtc();
+    final todayStr =
+        '${todayKey.year.toString().padLeft(4, '0')}-${todayKey.month.toString().padLeft(2, '0')}-${todayKey.day.toString().padLeft(2, '0')}';
+
+    final updatedDays = List<String>.from(prevDays);
+    if (!updatedDays.contains(todayStr)) {
+      updatedDays.add(todayStr);
+    } else {
+      // Already completed today: do nothing and exit
+      _updating = false;
+      return;
+    }
+
     setState(() {
-      _habits[index]['completedTimes'] = prev + 1;
+      habit['completedTimes'] = prevCount + 1;
+      habit['completedDays'] = updatedDays;
       _completedIndex = index;
     });
     _bounceController.forward(from: 0);
+
     try {
-      await widget.apiService.incrementHabitCompletedTimes(habitId);
+      final serverDays = await widget.apiService.incrementHabitCompletedTimes(
+        habitId,
+        completedDays: updatedDays,
+      );
+      if (mounted) {
+        setState(() {
+          habit['completedDays'] = serverDays;
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _habits[index]['completedTimes'] = prev;
+          habit['completedTimes'] = prevCount;
+          habit['completedDays'] = prevDays;
           _completedIndex = null;
         });
         ScaffoldMessenger.of(
@@ -279,17 +317,22 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   void _showHabitDetails(Map<String, dynamic> habit) {
     final cs = Theme.of(context).colorScheme;
     final now = DateTime.now();
-    final sampleCompleted = {
-      DateTime(now.year, now.month, now.day - 1).day,
-      DateTime(now.year, now.month, now.day - 3).day,
-      DateTime(now.year, now.month, now.day - 4).day,
-      DateTime(now.year, now.month, now.day - 7).day,
-    };
+    final createdDate = _parseHabitDate(habit) ?? now;
+    final completedDays = <DateTime>[];
+    final rawCompleted = habit['completedDays'];
+    if (rawCompleted is List) {
+      for (final e in rawCompleted) {
+        final s = e.toString();
+        try {
+          final dt = DateTime.parse(s.length == 10 ? s : s);
+          if (dt.year > 1970) {
+            completedDays.add(DateTime(dt.year, dt.month, dt.day));
+          }
+        } catch (_) {}
+      }
+    }
     final daysInMonth = DateUtils.getDaysInMonth(now.year, now.month);
-    final addedDate =
-        _parseHabitDate(habit) ?? now.subtract(const Duration(days: 11));
-    final addedStr =
-        '${addedDate.year}-${addedDate.month.toString().padLeft(2, '0')}-${addedDate.day.toString().padLeft(2, '0')}';
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -305,7 +348,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                 _habitSentence(habit, cs),
                 const SizedBox(height: 18),
                 Text(
-                  'Calendar',
+                  'History',
                   style: GoogleFonts.gabarito(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -313,34 +356,41 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                   ),
                 ),
                 const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: List.generate(daysInMonth, (i) {
-                    final day = i + 1;
-                    final completed = sampleCompleted.contains(day);
-                    return Container(
-                      width: 34,
-                      height: 34,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: completed
-                            ? cs.primaryContainer
-                            : cs.surfaceVariant.withOpacity(0.4),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        '$day',
-                        style: GoogleFonts.gabarito(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                Center(
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: List.generate(daysInMonth, (i) {
+                      final day = i + 1;
+                      final completed = completedDays.any(
+                        (d) =>
+                            d.year == now.year &&
+                            d.month == now.month &&
+                            d.day == day,
+                      );
+                      return Container(
+                        width: 34,
+                        height: 34,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
                           color: completed
-                              ? cs.onPrimaryContainer
-                              : cs.onSurfaceVariant,
+                              ? cs.primaryContainer
+                              : cs.surfaceVariant.withOpacity(0.4),
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                      ),
-                    );
-                  }),
+                        child: Text(
+                          '$day',
+                          style: GoogleFonts.gabarito(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: completed
+                                ? cs.onPrimaryContainer
+                                : cs.onSurfaceVariant,
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
                 ),
                 const SizedBox(height: 20),
                 Row(
@@ -377,7 +427,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                 const SizedBox(height: 12),
                 _metricBox(
                   title: 'Added',
-                  value: addedStr,
+                  value: _formatDate(createdDate),
                   icon: Icons.event_available_rounded,
                   cs: cs,
                   iconColor: cs.primary,
@@ -530,6 +580,33 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
       return rem.take(3).join(', ') + (rem.length > 3 ? ' +' : '');
     }
     return 'None';
+  }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    if (date.year == now.year && date.month == now.month) {
+      return '${date.day} ${_monthName(date.month)}';
+    }
+    return '${date.day} ${_monthName(date.month)} ${date.year}';
+  }
+
+  String _monthName(int month) {
+    const names = [
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return names[month];
   }
 
   Widget _habitCard(Map<String, dynamic> h, int index, ColorScheme scheme) {

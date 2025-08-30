@@ -12,7 +12,7 @@ dynamic _parseJson(String jsonString) {
 
 class ApiService {
   final String _baseUrl =
-      'https://auraascend-fgf4aqf5gubgacb3.centralindia-01.azurewebsites.net';
+      'https://ubiquitous-waddle-557rj9965pwh7q7g-3000.app.github.dev';
   final Account account;
   final _storage = const FlutterSecureStorage();
 
@@ -364,6 +364,8 @@ class ApiService {
     required String habitName,
     required String habitGoal,
     required String habitLocation,
+    DateTime? createdAt,
+    List<String>? completedDays,
   }) async {
     final headers = await _getHeaders();
     final response = await http.post(
@@ -373,6 +375,8 @@ class ApiService {
         'habitName': habitName,
         'habitGoal': habitGoal,
         'habitLocation': habitLocation,
+        'createdAt': (createdAt ?? DateTime.now()).toIso8601String(),
+        'completedDays': completedDays ?? [],
       }),
     );
     if (response.statusCode == 200 || response.statusCode == 201) {
@@ -403,18 +407,28 @@ class ApiService {
     return [];
   }
 
-  Future<void> incrementHabitCompletedTimes(
-    String habitId,
-  ) async {
+  Future<List<String>> incrementHabitCompletedTimes(
+    String habitId, {
+    required List<String> completedDays,
+  }) async {
     final headers = await _getHeaders();
     final response = await http.put(
       Uri.parse('$_baseUrl/api/habit'),
       headers: headers,
-      body: jsonEncode({'habitId': habitId, 'incrementCompletedTimes': 1}),
+      body: jsonEncode({
+        'habitId': habitId,
+        'completedDays': completedDays,
+        'incrementCompletedTimes': 1,
+      }),
     );
-    if (response.statusCode != 201) {
+    if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception('Failed to update habit: ${response.body}');
     }
+    final data = (await compute(_parseJson, response.body));
+    if (data is Map && data['completedDays'] is List) {
+      return List<String>.from(data['completedDays'].map((e) => e.toString()));
+    }
+    return completedDays;
   }
 
   Future<void> saveHabitReminderLocal(
