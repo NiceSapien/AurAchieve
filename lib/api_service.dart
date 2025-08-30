@@ -368,6 +368,7 @@ class ApiService {
     List<String>? completedDays,
   }) async {
     final headers = await _getHeaders();
+    final cdJson = jsonEncode(completedDays ?? <String>[]);
     final response = await http.post(
       Uri.parse('$_baseUrl/api/habit'),
       headers: headers,
@@ -376,35 +377,46 @@ class ApiService {
         'habitGoal': habitGoal,
         'habitLocation': habitLocation,
         'createdAt': (createdAt ?? DateTime.now()).toIso8601String(),
-        'completedDays': completedDays ?? [],
+        'completedDays': cdJson,
       }),
     );
     if (response.statusCode == 200 || response.statusCode == 201) {
       return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
-    } else {
-      throw Exception('Failed to add habit: ${response.body}');
     }
+    throw Exception('Failed to add habit: ${response.body}');
   }
 
   Future<List<dynamic>> getHabits() async {
     final headers = await _getHeaders();
-    final res = await http.get(
-      Uri.parse('$_baseUrl/api/habit'),
-      headers: headers,
-    );
-    if (res.statusCode != 200) {
-      throw Exception('Failed to load habits: ${res.body}');
-    }
+    final res = await http.get(Uri.parse('$_baseUrl/api/habit'), headers: headers);
+    if (res.statusCode != 200) throw Exception('Failed to load habits: ${res.body}');
     final data = await compute(_parseJson, res.body);
-    if (data is List) return data;
-    if (data is Map) {
-      if (data['habits'] is List) return List.from(data['habits']);
-      if (data['documents'] is List) return List.from(data['documents']);
-      if (data['items'] is List) return List.from(data['items']);
-      if (data['data'] is List) return List.from(data['data']);
-      return [];
+    List habits;
+    if (data is List) {
+      habits = data;
+    } else if (data is Map) {
+      habits = (data['habits'] ?? data['documents'] ?? data['items'] ?? data['data'] ?? []) as List;
+    } else {
+      habits = [];
     }
-    return [];
+    for (final h in habits) {
+      if (h is Map && h['completedDays'] is String) {
+        final s = h['completedDays'] as String;
+        if (s.trim().isEmpty) {
+          h['completedDays'] = <String>[];
+        } else {
+          try {
+            final parsed = jsonDecode(s);
+            if (parsed is List) {
+              h['completedDays'] = List<String>.from(parsed.map((e) => e.toString()));
+              continue;
+            }
+          } catch (_) {}
+          h['completedDays'] = s.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+        }
+      }
+    }
+    return habits;
   }
 
   Future<List<String>> incrementHabitCompletedTimes(
@@ -412,21 +424,34 @@ class ApiService {
     required List<String> completedDays,
   }) async {
     final headers = await _getHeaders();
+    final cdJson = jsonEncode(completedDays);
     final response = await http.put(
       Uri.parse('$_baseUrl/api/habit'),
       headers: headers,
       body: jsonEncode({
         'habitId': habitId,
-        'completedDays': completedDays,
+        'completedDays': cdJson,
         'incrementCompletedTimes': 1,
       }),
     );
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception('Failed to update habit: ${response.body}');
     }
-    final data = (await compute(_parseJson, response.body));
-    if (data is Map && data['completedDays'] is List) {
-      return List<String>.from(data['completedDays'].map((e) => e.toString()));
+    final data = await compute(_parseJson, response.body);
+    if (data is Map) {
+      final raw = data['completedDays'];
+      if (raw is String && raw.isNotEmpty) {
+        try {
+          final parsed = jsonDecode(raw);
+          if (parsed is List) {
+            return List<String>.from(parsed.map((e) => e.toString()));
+          }
+        } catch (_) {}
+        // fallback: maybe comma list
+        return raw.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      } else if (raw is List) {
+        return List<String>.from(raw.map((e) => e.toString()));
+      }
     }
     return completedDays;
   }

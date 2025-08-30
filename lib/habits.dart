@@ -5,6 +5,7 @@ import 'api_service.dart';
 import 'screens/habit_setup.dart';
 import 'dart:async';
 import 'widgets/dynamic_color_svg.dart' as dynamic_color_svg;
+import 'dart:convert';
 
 class HabitsPage extends StatefulWidget {
   final ApiService apiService;
@@ -150,6 +151,17 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
           m['completedDays'] = List<String>.from(
             (m['completedDays'] as List).map((e) => e.toString()),
           );
+        } else if (m['completedDays'] is String) {
+          final s = (m['completedDays'] as String).trim();
+          if (s.isEmpty) {
+            m['completedDays'] = <String>[];
+          } else {
+            m['completedDays'] = s
+                .split(',')
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty)
+                .toList();
+          }
         } else {
           m['completedDays'] = <String>[];
         }
@@ -314,23 +326,68 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     return null;
   }
 
+  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  int _computeStreak(Set<DateTime> completedSet) {
+    if (completedSet.isEmpty) return 0;
+    final today = _dateOnly(DateTime.now());
+    if (!completedSet.contains(today)) return 0;
+    int streak = 0;
+    var cursor = today;
+    while (completedSet.contains(cursor)) {
+      streak++;
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+    return streak;
+  }
+
+  double _computeConsistency(int completedCount, DateTime createdAt) {
+    final start = _dateOnly(createdAt);
+    final today = _dateOnly(DateTime.now());
+    if (today.isBefore(start)) return 0;
+    final totalDays = today.difference(start).inDays + 1;
+    if (totalDays <= 0) return 0;
+    return (completedCount / totalDays) * 100;
+  }
+
   void _showHabitDetails(Map<String, dynamic> habit) {
     final cs = Theme.of(context).colorScheme;
     final now = DateTime.now();
     final createdDate = _parseHabitDate(habit) ?? now;
     final completedDays = <DateTime>[];
-    final rawCompleted = habit['completedDays'];
-    if (rawCompleted is List) {
-      for (final e in rawCompleted) {
-        final s = e.toString();
-        try {
-          final dt = DateTime.parse(s.length == 10 ? s : s);
-          if (dt.year > 1970) {
-            completedDays.add(DateTime(dt.year, dt.month, dt.day));
-          }
-        } catch (_) {}
+    final raw = habit['completedDays'];
+    Iterable<String> dayStrings = const [];
+    if (raw is List) {
+      dayStrings = raw.map((e) => e.toString());
+    } else if (raw is String && raw.isNotEmpty) {
+      try {
+        final parsed = jsonDecode(raw);
+        if (parsed is List) {
+          dayStrings = parsed.map((e) => e.toString());
+        } else {
+          dayStrings = raw.split(',');
+        }
+      } catch (_) {
+        dayStrings = raw.split(',');
       }
     }
+    for (final s in dayStrings) {
+      final t = s.trim();
+      if (t.isEmpty) continue;
+      try {
+        final dt = DateTime.parse(t);
+        completedDays.add(_dateOnly(dt));
+      } catch (_) {}
+    }
+    final completedSet = completedDays.toSet();
+    final streak = _computeStreak(completedSet);
+    final streakStr = streak == 1 ? '1 day' : '$streak days';
+    final consistencyPct = _computeConsistency(
+      completedSet.length,
+      createdDate,
+    );
+    final consistencyStr =
+        '${consistencyPct.toStringAsFixed(consistencyPct >= 10 ? 0 : 1)}%';
     final daysInMonth = DateUtils.getDaysInMonth(now.year, now.month);
 
     showModalBottomSheet(
@@ -398,7 +455,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                     Expanded(
                       child: _metricBox(
                         title: 'Streak',
-                        value: '7 days',
+                        value: streakStr,
                         icon: Icons.local_fire_department_rounded,
                         cs: cs,
                         iconColor: cs.primary,
@@ -408,7 +465,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                     Expanded(
                       child: _metricBox(
                         title: 'Consistency',
-                        value: '69%',
+                        value: consistencyStr,
                         icon: Icons.insights_rounded,
                         cs: cs,
                         iconColor: cs.tertiary,
