@@ -5,14 +5,13 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/foundation.dart';
 
-// Top-level function for JSON parsing in a separate isolate
 dynamic _parseJson(String jsonString) {
   return jsonDecode(jsonString);
 }
 
 class ApiService {
   final String _baseUrl =
-      'https://ubiquitous-waddle-557rj9965pwh7q7g-3000.app.github.dev';
+      'https://auraascend-fgf4aqf5gubgacb3.centralindia-01.azurewebsites.net';
   final Account account;
   final _storage = const FlutterSecureStorage();
 
@@ -388,14 +387,24 @@ class ApiService {
 
   Future<List<dynamic>> getHabits() async {
     final headers = await _getHeaders();
-    final res = await http.get(Uri.parse('$_baseUrl/api/habit'), headers: headers);
-    if (res.statusCode != 200) throw Exception('Failed to load habits: ${res.body}');
+    final res = await http.get(
+      Uri.parse('$_baseUrl/api/habit'),
+      headers: headers,
+    );
+    if (res.statusCode != 200)
+      throw Exception('Failed to load habits: ${res.body}');
     final data = await compute(_parseJson, res.body);
     List habits;
     if (data is List) {
       habits = data;
     } else if (data is Map) {
-      habits = (data['habits'] ?? data['documents'] ?? data['items'] ?? data['data'] ?? []) as List;
+      habits =
+          (data['habits'] ??
+                  data['documents'] ??
+                  data['items'] ??
+                  data['data'] ??
+                  [])
+              as List;
     } else {
       habits = [];
     }
@@ -408,11 +417,17 @@ class ApiService {
           try {
             final parsed = jsonDecode(s);
             if (parsed is List) {
-              h['completedDays'] = List<String>.from(parsed.map((e) => e.toString()));
+              h['completedDays'] = List<String>.from(
+                parsed.map((e) => e.toString()),
+              );
               continue;
             }
           } catch (_) {}
-          h['completedDays'] = s.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+          h['completedDays'] = s
+              .split(',')
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty)
+              .toList();
         }
       }
     }
@@ -448,7 +463,11 @@ class ApiService {
           }
         } catch (_) {}
         // fallback: maybe comma list
-        return raw.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+        return raw
+            .split(',')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
       } else if (raw is List) {
         return List<String>.from(raw.map((e) => e.toString()));
       }
