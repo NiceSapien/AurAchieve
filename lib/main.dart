@@ -23,10 +23,10 @@ Future<void> _initializeNotifications() async {
 
   const DarwinInitializationSettings initializationSettingsIOS =
       DarwinInitializationSettings(
-    requestAlertPermission: true,
-    requestBadgePermission: true,
-    requestSoundPermission: true,
-  );
+        requestAlertPermission: true,
+        requestBadgePermission: true,
+        requestSoundPermission: true,
+      );
 
   final InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
@@ -206,21 +206,17 @@ class DynamicColorSvg extends StatelessWidget {
     return FutureBuilder<String>(
       future: DefaultAssetBundle.of(context).loadString(assetName),
       builder: (BuildContext context, AsyncSnapshot<String> snapshot) {
-        String svgStringToShow;
-
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
+        if (!snapshot.hasData || snapshot.data == null) {
           return SizedBox(width: width, height: height);
         }
 
-        if (snapshot.hasError) {
-          print('Error loading SVG $assetName: ${snapshot.error}');
-          svgStringToShow =
-              '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"></svg>';
+        String svgStringToShow = '';
+
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            (snapshot.data == null || snapshot.data!.isEmpty)) {
+          svgStringToShow = '';
         } else {
-          svgStringToShow =
-              snapshot.data ??
-              '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"></svg>';
+          svgStringToShow = snapshot.data ?? '';
         }
 
         final String r = color.red.toRadixString(16).padLeft(2, '0');
