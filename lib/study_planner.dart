@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
+import 'dart:async';
 
 import 'widgets/dynamic_color_svg.dart';
 import 'api_service.dart';
@@ -91,6 +93,10 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
   IconData _currentSubjectIcon = Icons.subject;
   bool _showFullSchedule = false;
 
+  final ScrollController _previewScrollController = ScrollController();
+  Map<String, dynamic>? _draggingPayload;
+  Timer? _autoScrollTimer;
+
   static final List<Color> _subjectColors = [
     Colors.green[200]!,
     Colors.purple[200]!,
@@ -112,17 +118,97 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
 
   @override
   void dispose() {
+    _autoScrollTimer?.cancel();
+    _previewScrollController.dispose();
     _pageController.dispose();
     _subjectController.dispose();
     super.dispose();
   }
 
+  void _startAutoScroll(Offset globalPos) {
+    const edgeExtent = 80.0;
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final size = box.size;
+    final y = globalPos.dy;
+    double? direction;
+    if (y < edgeExtent) {
+      direction = -1;
+    } else if (y > size.height - edgeExtent) {
+      direction = 1;
+    }
+    if (direction == null) {
+      _autoScrollTimer?.cancel();
+      _autoScrollTimer = null;
+      return;
+    }
+    _autoScrollTimer ??= Timer.periodic(const Duration(milliseconds: 60), (_) {
+      final sc = _previewScrollController;
+      if (!sc.hasClients) return;
+      final newOffset = (sc.offset + direction! * 40).clamp(
+        0.0,
+        sc.position.maxScrollExtent,
+      );
+      sc.jumpTo(newOffset);
+    });
+  }
+
+  void _stopAutoScroll() {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = null;
+  }
+
+  void _addTaskToDay(String date, Map<String, dynamic> task) {
+    final idx = _generatedTimetable.indexWhere((d) => d['date'] == date);
+    if (idx == -1) return;
+    final tasks = List<Map<String, dynamic>>.from(
+      _generatedTimetable[idx]['tasks'] as List,
+    );
+    tasks.removeWhere((t) => t['type'] == 'break');
+    tasks.add(task);
+    setState(() {
+      _generatedTimetable[idx]['tasks'] = tasks;
+    });
+  }
+
   IconData _getIconForSubject(String subjectName) {
-    final lowerCaseName = subjectName.toLowerCase();
-    for (var key in kSubjectIconMap.keys) {
-      if (lowerCaseName.contains(key.toString())) {
-        return kSubjectIconMap[key]!;
-      }
+    final s = subjectName.toLowerCase().trim();
+    if (s.isEmpty) return Icons.subject;
+    final rules = <RegExp, IconData>{
+      RegExp(
+        r'\b(math|mathematics|maths|algebra|calc|calculus|trig|geometry|stat|statistics)\b',
+      ): Icons.calculate,
+      RegExp(r'\b(phys|physics|phy)\b'): Icons.science_outlined,
+      RegExp(r'\b(chem|chemistry)\b'): Icons.biotech_outlined,
+      RegExp(r'\b(bio|biology)\b'): Icons.biotech_outlined,
+      RegExp(r'\b(geo|geog|geography|earth|enviro|environment)\b'):
+          Icons.public_outlined,
+      RegExp(r'\b(hist|history)\b'): Icons.history_edu_outlined,
+      RegExp(r'\b(cs|computer|program|coding|code|software|informatics|it)\b'):
+          Icons.code,
+      RegExp(r'\b(eng|english|language|literature|lit|lang arts)\b'):
+          Icons.translate_outlined,
+      RegExp(r'\b(econ|economics)\b'): Icons.account_balance_outlined,
+      RegExp(r'\b(bus|business|commerce|acct|accounting|finance)\b'):
+          Icons.account_balance_outlined,
+      RegExp(r'\b(art|drawing|design|paint|sketch|visual)\b'):
+          Icons.palette_outlined,
+      RegExp(r'\b(music|piano|guitar|violin|band|choir)\b'):
+          Icons.music_note_outlined,
+      RegExp(
+        r'\b(pe|sport|sports|fitness|health|phys ed|physical education)\b',
+      ): Icons.fitness_center,
+      RegExp(r'\b(ast|astro|astronomy|space)\b'): Icons.rocket_launch_outlined,
+      RegExp(
+        r'\b(lang|french|spanish|german|italian|latin|arabic|chinese|japanese|russian|hindi|punjabi)\b',
+      ): Icons.translate_outlined,
+      RegExp(r'\b(philosophy|ethics|logic)\b'): Icons.history_edu_outlined,
+      RegExp(r'\b(psych|psychology|sociology|social)\b'): Icons.subject,
+      RegExp(r'\b(comp sci|computer science)\b'): Icons.code,
+      RegExp(r'\b(engineer|engineering)\b'): Icons.architecture_outlined,
+    };
+    for (final entry in rules.entries) {
+      if (entry.key.hasMatch(s)) return entry.value;
     }
     return Icons.subject;
   }
@@ -1099,136 +1185,275 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                       "Could not generate study plan. Check deadline and chapters.",
                     ),
                   )
-                : ListView.builder(
-                    itemCount: _generatedTimetable.length,
-                    itemBuilder: (context, index) {
-                      final day = _generatedTimetable[index];
-                      final date = DateTime.parse(day['date'] as String);
-                      final tasks = day['tasks'] as List;
+                : Listener(
+                    onPointerMove: (e) {
+                      if (_draggingPayload != null)
+                        _startAutoScroll(e.position);
+                    },
+                    onPointerUp: (_) => _stopAutoScroll(),
+                    onPointerCancel: (_) => _stopAutoScroll(),
+                    child: ListView.builder(
+                      controller: _previewScrollController,
+                      itemCount: _generatedTimetable.length,
+                      itemBuilder: (context, index) {
+                        final day = _generatedTimetable[index];
+                        final date = DateTime.parse(day['date'] as String);
+                        final tasks = List<Map<String, dynamic>>.from(
+                          day['tasks'] as List,
+                        );
 
-                      return DragTarget<Map<String, dynamic>>(
-                        builder: (context, candidateData, rejectedData) {
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 8.0,
-                              ),
+                        Widget buildHandle() {
+                          final color = Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.55);
+                          return SizedBox(
+                            width: 28,
+                            height: 52,
+                            child: Center(
                               child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16.0,
+                                mainAxisSize: MainAxisSize.min,
+                                children: List.generate(3, (i) {
+                                  return Padding(
+                                    padding: EdgeInsets.only(bottom: i == 2 ? 0 : 5),
+                                    child: Container(
+                                      width: 16,
+                                      height: 2.2,
+                                      decoration: BoxDecoration(
+                                        color: color,
+                                        borderRadius: BorderRadius.circular(2),
+                                      ),
                                     ),
-                                    child: Text(
-                                      DateFormat('EEEE, MMM d').format(date),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurface,
-                                          ),
-                                    ),
-                                  ),
-
-                                  if (tasks.isEmpty)
-                                    _buildTaskTile(
-                                      {'type': 'break'},
-                                      day['date'] as String,
-                                      isPreview: true,
-                                    )
-                                  else
-                                    ...tasks.map((task) {
-                                      return Draggable<Map<String, dynamic>>(
-                                        data: {
-                                          'task': task,
-                                          'sourceDate': day['date'],
-                                        },
-
-                                        feedback: Material(
-                                          elevation: 4.0,
-                                          child: ConstrainedBox(
-                                            constraints: BoxConstraints(
-                                              maxWidth:
-                                                  MediaQuery.of(
-                                                    context,
-                                                  ).size.width *
-                                                  0.8,
-                                            ),
-                                            child: _buildTaskTile(
-                                              task,
-                                              day['date'],
-                                              isFeedback: true,
-                                              isPreview: true,
-                                            ),
-                                          ),
-                                        ),
-
-                                        childWhenDragging: Opacity(
-                                          opacity: 0.5,
-                                          child: _buildTaskTile(
-                                            task,
-                                            day['date'],
-                                            isPreview: true,
-                                          ),
-                                        ),
-
-                                        child: _buildTaskTile(
-                                          task,
-                                          day['date'],
-                                          isPreview: true,
-                                        ),
-                                      );
-                                    }),
-                                ],
+                                  );
+                                }),
                               ),
                             ),
                           );
-                        },
+                        }
 
-                        onAcceptWithDetails: (details) {
-                          final payload = details.data;
-                          final taskToMove =
-                              payload['task'] as Map<String, dynamic>;
-                          final sourceDateStr = payload['sourceDate'] as String;
-                          final targetDateStr = day['date'] as String;
-
-                          if (sourceDateStr == targetDateStr) return;
-
-                          setState(() {
-                            final sourceIndex = _generatedTimetable.indexWhere(
-                              (d) => d['date'] == sourceDateStr,
+                        List<Widget> taskWidgets = [];
+                        if (tasks.isEmpty) {
+                          taskWidgets.add(
+                            _buildTaskTile(
+                              {'type': 'break'},
+                              day['date'] as String,
+                              isPreview: true,
+                            ),
+                          );
+                        } else {
+                          for (int i = 0; i < tasks.length; i++) {
+                            final task = tasks[i];
+                            final isBreak = task['type'] == 'break';
+                            final tile = Stack(
+                              children: [
+                                _buildTaskTile(
+                                  task,
+                                  day['date'],
+                                  isPreview: true,
+                                ),
+                                Positioned(
+                                  right: 0,
+                                  top: 0,
+                                  bottom: 0,
+                                  child: IgnorePointer(
+                                    ignoring: true,
+                                    child: buildHandle(),
+                                  ),
+                                ),
+                              ],
                             );
-                            final targetIndex = _generatedTimetable.indexWhere(
-                              (d) => d['date'] == targetDateStr,
+
+                            if (isBreak) {
+                              taskWidgets.add(tile);
+                              continue;
+                            }
+
+                            taskWidgets.add(
+                              LongPressDraggable<Map<String, dynamic>>(
+                                data: {'task': task, 'sourceDate': day['date']},
+                                dragAnchorStrategy: childDragAnchorStrategy,
+                                onDragStarted: () {
+                                  HapticFeedback.mediumImpact();
+                                  setState(
+                                    () => _draggingPayload = {
+                                      'task': task,
+                                      'sourceDate': day['date'],
+                                    },
+                                  );
+                                },
+                                onDragEnd: (_) {
+                                  _stopAutoScroll();
+                                  setState(() => _draggingPayload = null);
+                                },
+                                onDraggableCanceled: (_, __) {
+                                  _stopAutoScroll();
+                                  setState(() => _draggingPayload = null);
+                                },
+                                feedback: Material(
+                                  elevation: 6,
+                                  borderRadius: BorderRadius.circular(12),
+                                  color: Colors.transparent,
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxWidth:
+                                          MediaQuery.of(context).size.width -
+                                          64,
+                                      minWidth:
+                                          MediaQuery.of(context).size.width -
+                                          64,
+                                    ),
+                                    child: Opacity(
+                                      opacity: 0.95,
+                                      child: _buildTaskTile(
+                                        task,
+                                        day['date'],
+                                        isFeedback: true,
+                                        isPreview: true,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                childWhenDragging: Opacity(
+                                  opacity: 0.35,
+                                  child: tile,
+                                ),
+                                child: tile,
+                              ),
                             );
+                            if (i == tasks.length - 1) continue;
+                          }
+                        }
 
-                            if (sourceIndex == -1 || targetIndex == -1) return;
+                        final isReceiving = _draggingPayload != null;
 
-                            final sourceTasks = List<Map<String, dynamic>>.from(
-                              _generatedTimetable[sourceIndex]['tasks'] as List,
+                        return DragTarget<Map<String, dynamic>>(
+                          builder: (context, candidate, rejected) {
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  border: isReceiving
+                                      ? Border.all(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary
+                                              .withOpacity(0.35),
+                                          width: 1.4,
+                                        )
+                                      : null,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16.0,
+                                      ),
+                                      child: Text(
+                                        DateFormat('EEEE, MMM d').format(date),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium
+                                            ?.copyWith(
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.onSurface,
+                                            ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    ...taskWidgets,
+                                    if (candidate.isNotEmpty)
+                                      AnimatedContainer(
+                                        duration: const Duration(
+                                          milliseconds: 120,
+                                        ),
+                                        height: 58,
+                                        margin: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary
+                                              .withOpacity(0.10),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          border: Border.all(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary
+                                                .withOpacity(0.4),
+                                          ),
+                                        ),
+                                        child: Center(
+                                          child: Text(
+                                            'Drop here',
+                                            style: TextStyle(
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.primary,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
                             );
-                            final targetTasks = List<Map<String, dynamic>>.from(
-                              _generatedTimetable[targetIndex]['tasks'] as List,
-                            );
+                          },
+                          onWillAccept: (data) => true,
+                          onAccept: (payload) {
+                            final taskToMove =
+                                payload['task'] as Map<String, dynamic>;
+                            final sourceDateStr =
+                                payload['sourceDate'] as String;
+                            final targetDateStr = day['date'] as String;
+                            if (sourceDateStr == targetDateStr) return;
 
-                            sourceTasks.removeWhere(
-                              (t) => t['id'] == taskToMove['id'],
-                            );
-
-                            targetTasks.add(taskToMove);
-
-                            _generatedTimetable[sourceIndex]['tasks'] =
-                                sourceTasks;
-                            _generatedTimetable[targetIndex]['tasks'] =
-                                targetTasks;
-                          });
-                        },
-                      );
-                    },
+                            setState(() {
+                              final sourceIndex = _generatedTimetable
+                                  .indexWhere(
+                                    (d) => d['date'] == sourceDateStr,
+                                  );
+                              final targetIndex = _generatedTimetable
+                                  .indexWhere(
+                                    (d) => d['date'] == targetDateStr,
+                                  );
+                              if (sourceIndex == -1 || targetIndex == -1)
+                                return;
+                              final sourceTasks =
+                                  List<Map<String, dynamic>>.from(
+                                    _generatedTimetable[sourceIndex]['tasks']
+                                        as List,
+                                  );
+                              final targetTasks =
+                                  List<Map<String, dynamic>>.from(
+                                    _generatedTimetable[targetIndex]['tasks']
+                                        as List,
+                                  );
+                              sourceTasks.removeWhere(
+                                (t) => t['id'] == taskToMove['id'],
+                              );
+                              targetTasks.removeWhere(
+                                (t) => t['type'] == 'break',
+                              );
+                              targetTasks.add(taskToMove);
+                              _generatedTimetable[sourceIndex]['tasks'] =
+                                  sourceTasks;
+                              _generatedTimetable[targetIndex]['tasks'] =
+                                  targetTasks;
+                              _draggingPayload = null;
+                            });
+                          },
+                        );
+                      },
+                    ),
                   ),
           ),
         ],

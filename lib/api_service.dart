@@ -391,8 +391,9 @@ class ApiService {
       Uri.parse('$_baseUrl/api/habit'),
       headers: headers,
     );
-    if (res.statusCode != 200)
+    if (res.statusCode != 200) {
       throw Exception('Failed to load habits: ${res.body}');
+    }
     final data = await compute(_parseJson, res.body);
     List habits;
     if (data is List) {

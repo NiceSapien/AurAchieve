@@ -1,4 +1,3 @@
-import 'main.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'api_service.dart';
@@ -52,8 +51,9 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
           vsync: this,
           duration: const Duration(milliseconds: 850),
         )..addStatusListener((s) {
-          if (s == AnimationStatus.completed && mounted)
+          if (s == AnimationStatus.completed && mounted) {
             setState(() => _completedIndex = null);
+          }
         });
     _bounceScale = _bounceController.drive(
       TweenSequence<double>([
@@ -144,8 +144,9 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         final localRem = id != null
             ? await widget.apiService.getHabitReminderLocal(id.toString())
             : null;
-        if (localRem != null && localRem.isNotEmpty)
+        if (localRem != null && localRem.isNotEmpty) {
           m['habitReminder'] = localRem;
+        }
         m['completedTimes'] = m['completedTimes'] ?? 0;
         if (m['completedDays'] is List) {
           m['completedDays'] = List<String>.from(
@@ -169,10 +170,11 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
       }
       if (mounted) setState(() => _habits = normalized);
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to load habits: $e')));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -459,7 +461,10 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                       child: OutlinedButton.icon(
                         onPressed: () async {
                           final id =
-                              (habit[r'$id'] ?? habit['id'] ?? habit['habitId'] ?? '')
+                              (habit[r'$id'] ??
+                                      habit['id'] ??
+                                      habit['habitId'] ??
+                                      '')
                                   .toString();
                           if (id.isEmpty) return;
                           final confirm = await showDialog<bool>(
@@ -740,8 +745,9 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: (active ? cs.secondary : cs.surfaceVariant)
-                            .withOpacity(active ? 0.22 : 0.12),
+                        color:
+                            (active ? cs.secondary : cs.surfaceContainerHighest)
+                                .withOpacity(active ? 0.22 : 0.12),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
                           color: cs.secondary.withOpacity(0.30),
@@ -919,8 +925,9 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
       animation: _bounceController,
       builder: (context, child) {
         double scale = 1.0;
-        if (_completedIndex != null && index == _completedIndex)
+        if (_completedIndex != null && index == _completedIndex) {
           scale = 1.0 + _bounceScale.value;
+        }
         if (holding) scale *= (1 - (progress * 0.04));
         return Transform.scale(scale: scale, child: child);
       },
@@ -1162,9 +1169,16 @@ class _HabitCalendar extends StatelessWidget {
   final DateTime created;
   final void Function(DateTime) onChange;
   final ColorScheme cs;
-  const _HabitCalendar({required this.month, required this.completed, required this.created, required this.onChange, required this.cs});
+  const _HabitCalendar({
+    required this.month,
+    required this.completed,
+    required this.created,
+    required this.onChange,
+    required this.cs,
+  });
   DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
-  bool _sameDay(DateTime a, DateTime b) => a.year == b.year && a.month == b.month && a.day == b.day;
+  bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -1190,27 +1204,29 @@ class _HabitCalendar extends StatelessWidget {
         bg = cs.primaryContainer;
         fg = cs.onPrimaryContainer;
       } else {
-        bg = cs.surfaceVariant.withOpacity(0.35);
+        bg = cs.surfaceContainerHighest.withOpacity(0.35);
         fg = cs.onSurfaceVariant;
       }
-      cells.add(Container(
-        margin: const EdgeInsets.all(2),
-        width: 40,
-        height: 40,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Text(
-          '$d',
-          style: GoogleFonts.gabarito(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: fg,
+      cells.add(
+        Container(
+          margin: const EdgeInsets.all(2),
+          width: 40,
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            '$d',
+            style: GoogleFonts.gabarito(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: fg,
+            ),
           ),
         ),
-      ));
+      );
     }
     final rows = (cells.length / 7).ceil();
     return Column(
@@ -1219,36 +1235,56 @@ class _HabitCalendar extends StatelessWidget {
         Row(
           children: [
             IconButton(
-              onPressed: month.isAfter(startLimit) ? () => onChange(DateTime(month.year, month.month - 1)) : null,
+              onPressed: month.isAfter(startLimit)
+                  ? () => onChange(DateTime(month.year, month.month - 1))
+                  : null,
               icon: const Icon(Icons.chevron_left_rounded),
-              color: month.isAfter(startLimit) ? cs.onSurfaceVariant : cs.onSurfaceVariant.withOpacity(0.25),
+              color: month.isAfter(startLimit)
+                  ? cs.onSurfaceVariant
+                  : cs.onSurfaceVariant.withOpacity(0.25),
             ),
             Expanded(
               child: Center(
                 child: Text(
                   '${_monthNameFull(month.month)} ${month.year}',
-                  style: GoogleFonts.gabarito(fontSize: 16, fontWeight: FontWeight.w700, color: cs.onSurface),
+                  style: GoogleFonts.gabarito(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface,
+                  ),
                 ),
               ),
             ),
             IconButton(
-              onPressed: month.isBefore(endLimit) ? () => onChange(DateTime(month.year, month.month + 1)) : null,
+              onPressed: month.isBefore(endLimit)
+                  ? () => onChange(DateTime(month.year, month.month + 1))
+                  : null,
               icon: const Icon(Icons.chevron_right_rounded),
-              color: month.isBefore(endLimit) ? cs.onSurfaceVariant : cs.onSurfaceVariant.withOpacity(0.25),
+              color: month.isBefore(endLimit)
+                  ? cs.onSurfaceVariant
+                  : cs.onSurfaceVariant.withOpacity(0.25),
             ),
           ],
         ),
         const SizedBox(height: 4),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d) => Expanded(
-            child: Center(
-              child: Text(
-                d,
-                style: GoogleFonts.gabarito(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurfaceVariant),
-              ),
-            ),
-          )).toList(),
+          children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+              .map(
+                (d) => Expanded(
+                  child: Center(
+                    child: Text(
+                      d,
+                      style: GoogleFonts.gabarito(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
         ),
         const SizedBox(height: 4),
         Column(
@@ -1257,7 +1293,12 @@ class _HabitCalendar extends StatelessWidget {
               children: List.generate(7, (c) {
                 final idx = r * 7 + c;
                 if (idx < cells.length) {
-                  return Expanded(child: SizedBox(height: 44, child: Center(child: cells[idx])));
+                  return Expanded(
+                    child: SizedBox(
+                      height: 44,
+                      child: Center(child: cells[idx]),
+                    ),
+                  );
                 }
                 return const Expanded(child: SizedBox(height: 44));
               }),
@@ -1267,8 +1308,22 @@ class _HabitCalendar extends StatelessWidget {
       ],
     );
   }
+
   String _monthNameFull(int m) {
-    const full = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const full = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
     return full[m - 1];
   }
 }
