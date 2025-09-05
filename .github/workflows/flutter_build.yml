@@ -57,13 +57,13 @@ jobs:
       # NOTE: Analyze and test steps removed.
 
       - name: Build Flutter APK (Debug)
-        run: flutter build apk --rdebug
+        run: flutter build apk --debug
 
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
   
   #----------------------------------------------------
   # Build iOS (Requires macOS runner)
@@ -72,25 +72,32 @@ jobs:
     name: Build Flutter (iOS)
     runs-on: macos-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
-
-      - name: Install dependencies and pods
+          channel: stable
+      - run: flutter clean
+      - run: flutter pub get
+      - name: Pod install
+        working-directory: ios
         run: |
-          flutter clean
-          flutter pub get
-          cd ios
-          pod install --repo-update
-      - name: Build unsigned IPA
-        run: flutter build ipa --no-codesign
-
-      - name: Upload Unsigned iOS IPA Artifact
-        uses: actions/upload-artifact@v4
+          pod repo update
+          pod install
+      - name: Build unsigned iOS (release)
+        run: flutter build ios --release --no-codesign
+      - name: Package TrollStore raw IPA
+        run: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/
+          zip -ry Runner-TrollStore-raw.ipa Payload
+          mv Runner-TrollStore-raw.ipa ../../Runner-TrollStore-raw.ipa
+      - name: Arch check
+        run: file build/ios/iphoneos/Runner.app/Runner || true
+      - uses: actions/upload-artifact@v4
         with:
-          name: unsigned-ios-ipa
-          path: build/ios/ipa/*.ipa
+          name: ios-trollstore
+          path: |
+            build/ios/Runner-TrollStore-raw.ipa
+            entitlements_trollstore.plist
+            build/ios/iphoneos/Runner.app
