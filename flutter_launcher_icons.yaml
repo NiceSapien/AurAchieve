@@ -13,22 +13,22 @@ flutter_launcher_icons:
   ios: true
   image_path_ios: "assets/icon/icon.jpg"
   remove_alpha_ios: true
-  # image_path_ios_dark_transparent: "assets/icon/icon_dark.png"
-  # image_path_ios_tinted_grayscale: "assets/icon/icon_tinted.png"
-  # desaturate_tinted_to_grayscale_ios: true
-  # background_color_ios: "#ffffff"
+  image_path_ios_dark_transparent: "assets/icon/foreground.png"
+  image_path_ios_tinted_grayscale: "assets/icon/foreground.png"
+  desaturate_tinted_to_grayscale_ios: true
+  background_color_ios: "#ffffff"
 
   web:
-    generate: true
+    generate: false
     image_path: "assets/icon/icon.jpg"
     background_color: "#hexcode"
     theme_color: "#hexcode"
 
   windows:
-    generate: true
+    generate: false
     image_path: "assets/icon/icon.jpg"
     icon_size: 48 # min:48, max:256, default: 48
 
   macos:
-    generate: true
+    generate: false
     image_path: "assets/icon/icon.jpg"

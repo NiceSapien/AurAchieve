@@ -9,15 +9,14 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  appwrite: ^17.0.0
-  flutter_svg: ^2.2.0
+  appwrite: ^18.0.0
+  flutter_svg: ^2.0.10
   google_fonts: ^6.2.1
   image_picker: ^1.1.2
   shared_preferences: ^2.2.2
   dynamic_color: ^1.6.6
   http: ^1.4.0
   flutter_secure_storage: ^9.2.4
-  connectivity_plus: ^6.1.4
   intl: ^0.20.2
   timezone: ^0.10.1
   flutter_timezone: ^4.1.1
@@ -25,9 +24,6 @@ dependencies:
   flutter_launcher_icons: ^0.14.4
   flutter_local_notifications: ^19.4.0
   vector_math: ^2.2.0
-
-dependency_overrides:
-  flutter_web_auth_2: ^4.1.0
 
 dev_dependencies:
   flutter_test:

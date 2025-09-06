@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+// import 'package:flutter_local_notifications/flutter_local_notifications.dart'; // Disabled
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
 
@@ -39,17 +39,18 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
   }
 
   Future<bool> _requestPermissions() async {
-    if (Platform.isIOS) {
-      return await flutterLocalNotificationsPlugin
-              .resolvePlatformSpecificImplementation<
-                IOSFlutterLocalNotificationsPlugin
-              >()
-              ?.requestPermissions(alert: true, badge: true, sound: true) ??
-          false;
-    } else if (Platform.isAndroid) {
-      return true;
-    }
-    return false;
+    // if (Platform.isIOS) {
+    //   return await flutterLocalNotificationsPlugin
+    //           .resolvePlatformSpecificImplementation<
+    //             IOSFlutterLocalNotificationsPlugin
+    //           >()
+    //           ?.requestPermissions(alert: true, badge: true, sound: true) ??
+    //       false;
+    // } else if (Platform.isAndroid) {
+    //   return true;
+    // }
+    // return false;
+    return true; // Always allow for now
   }
 
   tz.TZDateTime _nextInstanceOf(int day, TimeOfDay time) {
@@ -72,20 +73,21 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
   }
 
   Future<void> _scheduleNotification() async {
-    if (_selectedTime == null) return;
+    // Disabled all notification scheduling
+    // if (_selectedTime == null) return;
 
-    const androidDetails = AndroidNotificationDetails(
-      'habit_reminders',
-      'Habit Reminders',
-      channelDescription: 'Notifications to remind you of your habits',
-      importance: Importance.max,
-      priority: Priority.high,
-    );
-    const iosDetails = DarwinNotificationDetails();
-    const notificationDetails = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
+    // const androidDetails = AndroidNotificationDetails(
+    //   'habit_reminders',
+    //   'Habit Reminders',
+    //   channelDescription: 'Notifications to remind you of your habits',
+    //   importance: Importance.max,
+    //   priority: Priority.high,
+    // );
+    // const iosDetails = DarwinNotificationDetails();
+    // const notificationDetails = NotificationDetails(
+    //   android: androidDetails,
+    //   iOS: iosDetails,
+    // );
 
     final bool anyDaySelected = _selectedDays.any((d) => d);
 
@@ -93,15 +95,15 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       for (int i = 0; i < _selectedDays.length; i++) {
         if (_selectedDays[i]) {
           final day = i + 1;
-          await flutterLocalNotificationsPlugin.zonedSchedule(
-            widget.habitName.hashCode + day,
-            'Time for your habit!',
-            'I will ${widget.habitName}, ${widget.habitCue}',
-            _nextInstanceOf(day, _selectedTime!),
-            notificationDetails,
-            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-            matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
-          );
+          // await flutterLocalNotificationsPlugin.zonedSchedule(
+          //   widget.habitName.hashCode + day,
+          //   'Time for your habit!',
+          //   'I will ${widget.habitName}, ${widget.habitCue}',
+          //   _nextInstanceOf(day, _selectedTime!),
+          //   notificationDetails,
+          //   androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          //   matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+          // );
         }
       }
     } else {
@@ -117,14 +119,14 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       if (scheduledDate.isBefore(now)) {
         scheduledDate = scheduledDate.add(const Duration(days: 1));
       }
-      await flutterLocalNotificationsPlugin.zonedSchedule(
-        widget.habitName.hashCode,
-        'Time for your habit!',
-        'I will ${widget.habitName}, ${widget.habitCue}',
-        scheduledDate,
-        notificationDetails,
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      );
+      // await flutterLocalNotificationsPlugin.zonedSchedule(
+      //   widget.habitName.hashCode,
+      //   'Time for your habit!',
+      //   'I will ${widget.habitName}, ${widget.habitCue}',
+      //   scheduledDate,
+      //   notificationDetails,
+      //   androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      // );
     }
   }
 
@@ -150,7 +152,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
           if (_selectedDays[i]) selected.add('${days[i]} $timeStr');
         }
         await widget.apiService.saveHabitReminderLocal(habitId, selected);
-        await _scheduleNotification();
+        // await _scheduleNotification(); // Disabled
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

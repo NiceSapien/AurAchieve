@@ -9,12 +9,12 @@ import 'package:flutter/services.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_timezone/flutter_timezone.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+//import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'theme.dart';
 import 'home.dart';
 
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+/*final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 Future<void> _initializeNotifications() async {
@@ -35,7 +35,7 @@ Future<void> _initializeNotifications() async {
 
   await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 }
-
+*/
 Future<void> _initializeTimezone() async {
   tz_data.initializeTimeZones();
   try {
@@ -55,7 +55,7 @@ void main() async {
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   await _initializeTimezone();
-  await _initializeNotifications();
+  //  await _initializeNotifications();
 
   //  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
