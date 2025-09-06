@@ -206,17 +206,21 @@ class DynamicColorSvg extends StatelessWidget {
     return FutureBuilder<String>(
       future: DefaultAssetBundle.of(context).loadString(assetName),
       builder: (BuildContext context, AsyncSnapshot<String> snapshot) {
-        if (!snapshot.hasData || snapshot.data == null) {
+        String svgStringToShow;
+
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
           return SizedBox(width: width, height: height);
         }
 
-        String svgStringToShow = '';
-
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            (snapshot.data == null || snapshot.data!.isEmpty)) {
-          svgStringToShow = '';
+        if (snapshot.hasError) {
+          print('Error loading SVG $assetName: ${snapshot.error}');
+          svgStringToShow =
+              '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"></svg>';
         } else {
-          svgStringToShow = snapshot.data ?? '';
+          svgStringToShow =
+              snapshot.data ??
+              '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"></svg>';
         }
 
         final String r = color.red.toRadixString(16).padLeft(2, '0');

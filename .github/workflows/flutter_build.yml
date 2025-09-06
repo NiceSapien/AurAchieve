@@ -69,34 +69,58 @@ jobs:
   # Build iOS (Requires macOS runner)
   #----------------------------------------------------
   build_ios:
-    name: Build Flutter (iOS)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-      - run: flutter clean
-      - run: flutter pub get
-      - name: Pod install
-        working-directory: ios
-        run: |
-          pod repo update
-          pod install
-      - name: Build unsigned iOS (debug)
-        run: flutter build ios --debug --no-codesign
-      - name: Package TrollStore raw IPA
-        run: |
-          cd build/ios/iphoneos
-          mkdir -p Payload
-          cp -R Runner.app Payload/
-          zip -ry Runner-TrollStore-raw.ipa Payload
-          mv Runner-TrollStore-raw.ipa ../../Runner-TrollStore-raw.ipa
-      - name: Arch check
-        run: file build/ios/iphoneos/Runner.app/Runner || true
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ios-trollstore
-          path: |
-            build/ios/Runner-TrollStore-raw.ipa
-            build/ios/iphoneos/Runner.app
+   name: Build Flutter (iOS)
+   runs-on: macos-14
+   steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
+
+    - name: Get Flutter dependencies
+      run: flutter pub get
+
+    - name: Build Flutter iOS (Release - No Code Signing)
+      # This command places the .app bundle at build/ios/iphoneos/Runner.app
+      run: flutter build ios --release --no-codesign
+
+    - name: Package .app into .ipa (Unsigned)
+      run: |
+        # Define paths for clarity
+        APP_BUNDLE_SOURCE="build/ios/iphoneos/Runner.app"
+        PAYLOAD_DIR="Payload"
+        OUTPUT_IPA_NAME="AurAchieve.ipa"
+        # Create the Payload directory. It will be created at the repository root.
+        mkdir -p "$PAYLOAD_DIR"
+        # Copy the Runner.app bundle into the Payload directory.
+        # This results in ./Payload/Runner.app
+        cp -r "$APP_BUNDLE_SOURCE" "$PAYLOAD_DIR/"
+        # List contents for debugging (optional, but good for verification)
+        echo "Contents of Payload directory:"
+        ls -R "$PAYLOAD_DIR"
+        # Create the .ipa file by zipping the Payload directory.
+        # The crucial part: running `zip -r <output.ipa> <directory_to_zip>/`
+        # ensures that <directory_to_zip> becomes the root of the archive.
+        # So, zipping "Payload/" from the current working directory
+        # means "Payload/" is at the root of the .ipa.
+        zip -r "$OUTPUT_IPA_NAME" "$PAYLOAD_DIR"
+        # Optional: Clean up the temporary Payload directory
+        rm -rf "$PAYLOAD_DIR"
+        echo "Generated IPA path: $(pwd)/$OUTPUT_IPA_NAME"
+        echo "Verifying IPA contents (unzipping in temp dir):"
+        mkdir -p temp_ipa_check
+        unzip -l "$OUTPUT_IPA_NAME" -d temp_ipa_check
+        echo "Contents of temp_ipa_check:"
+        ls -R temp_ipa_check
+        rm -rf temp_ipa_check
+      # Ensure this step always runs, even if previous ones fail (not needed here but good practice)
+      # if: success() || failure()
+
+    - name: Upload Unsigned iOS IPA Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: unsigned-ios-ipa
+        path: AurAchieve.ipa # This path points to the IPA created in the previous step
