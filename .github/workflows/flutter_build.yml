@@ -83,9 +83,9 @@ jobs:
     - name: Get Flutter dependencies
       run: flutter pub get
 
-    - name: Build Flutter iOS (Release - No Code Signing)
+    - name: Build Flutter iOS (Profile - No Code Signing)
       # This command places the .app bundle at build/ios/iphoneos/Runner.app
-      run: flutter build ios --release --no-codesign
+      run: flutter build ios --profile --no-codesign
 
     - name: Package .app into .ipa (Unsigned)
       run: |
@@ -124,5 +124,4 @@ jobs:
       with:
         name: unsigned-ios-ipa
         path: |
-          AurAchieve.ipa # This path points to the IPA created in the previous step
-          ios/Podfile
+          AurAchieve.ipa
