@@ -123,4 +123,6 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: unsigned-ios-ipa
-        path: AurAchieve.ipa # This path points to the IPA created in the previous step
+        path: |
+          AurAchieve.ipa # This path points to the IPA created in the previous step
+          ios/Podfile
