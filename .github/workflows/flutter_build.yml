@@ -56,14 +56,14 @@ jobs:
 
       # NOTE: Analyze and test steps removed.
 
-      - name: Build Flutter APK (Debug)
-        run: flutter build apk --debug
+      - name: Build Flutter APK (Profile)
+        run: flutter build apk --profile
 
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: build/app/outputs/flutter-apk/app-profile.apk
   
   #----------------------------------------------------
   # Build iOS (Requires macOS runner)

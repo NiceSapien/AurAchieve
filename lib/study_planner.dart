@@ -116,6 +116,11 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
     _loadTimetableData();
   }
 
+  void _setStateIfMounted(VoidCallback fn) {
+    if (!mounted) return;
+    setState(fn);
+  }
+
   @override
   void dispose() {
     _autoScrollTimer?.cancel();
@@ -214,13 +219,15 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
   }
 
   Future<void> _loadTimetableData() async {
-    setState(() {
+    _setStateIfMounted(() {
       _isLoading = true;
     });
     try {
       final plan = await widget.apiService.getStudyPlan();
+      if (!mounted) return;
+
       if (plan != null) {
-        setState(() {
+        _setStateIfMounted(() {
           _studyPlan = plan;
           _isSetupComplete = true;
           final subjectsJson = plan['subjects'] as List;
@@ -252,7 +259,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
               .toList();
         });
       } else {
-        setState(() {
+        _setStateIfMounted(() {
           _isSetupComplete = false;
         });
       }
@@ -263,14 +270,18 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
           SnackBar(content: Text('Failed to load study plan: $e')),
         );
       }
-      setState(() {
-        _isSetupComplete = false;
-      });
+      if (mounted) {
+        _setStateIfMounted(() {
+          _isSetupComplete = false;
+        });
+      }
     } finally {
-      setState(() {
+      if (!mounted) return;
+      _setStateIfMounted(() {
         _isLoading = false;
       });
-      widget.onSetupStateChanged(_isSetupComplete);
+
+      if (mounted) widget.onSetupStateChanged(_isSetupComplete);
     }
   }
 
@@ -305,11 +316,13 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         ],
       ),
     );
+    if (!mounted) return;
 
     if (confirm == true) {
       try {
         await widget.apiService.deleteStudyPlan();
-        setState(() {
+        if (!mounted) return;
+        _setStateIfMounted(() {
           _isSetupComplete = false;
           _subjects.clear();
           _chapters.clear();
@@ -318,7 +331,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
           _studyPlan = null;
           _currentPage = 0;
         });
-        widget.onSetupStateChanged(false);
+        if (mounted) widget.onSetupStateChanged(false);
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(
@@ -455,12 +468,12 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
   }
 
   Future<void> _generateTimetable() async {
-    setState(() {
+    _setStateIfMounted(() {
       _isGenerating = true;
     });
 
     if (_subjects.isEmpty || _deadline == null) {
-      setState(() {
+      _setStateIfMounted(() {
         _isGenerating = false;
       });
       return;
@@ -471,16 +484,17 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         chapters: _chapters,
         deadline: _deadline!,
       );
+      if (!mounted) return;
 
       final newTimetable = apiResponse.map((dayData) {
         final date = dayData['date'] as String;
-        final tasks = (dayData['tasks'] as List<dynamic>).map((taskData) {
-          return Map<String, dynamic>.from(taskData);
-        }).toList();
+        final tasks = (dayData['tasks'] as List<dynamic>)
+            .map((taskData) => Map<String, dynamic>.from(taskData))
+            .toList();
         return {'date': date, 'tasks': tasks};
       }).toList();
 
-      setState(() {
+      _setStateIfMounted(() {
         _generatedTimetable = newTimetable;
       });
     } catch (e) {
@@ -491,16 +505,15 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isGenerating = false;
-        });
-      }
+      if (!mounted) return;
+      _setStateIfMounted(() {
+        _isGenerating = false;
+      });
     }
   }
 
   Future<void> _saveAndFinish() async {
-    setState(() {
+    _setStateIfMounted(() {
       _isSaving = true;
     });
     try {
@@ -511,6 +524,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         deadline: _deadline!,
         timetable: _generatedTimetable,
       );
+      if (!mounted) return;
       await _loadTimetableData();
     } catch (e) {
       print('Error saving study plan: $e');
@@ -520,11 +534,10 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-        });
-      }
+      if (!mounted) return;
+      _setStateIfMounted(() {
+        _isSaving = false;
+      });
     }
   }
 
@@ -1203,7 +1216,9 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                         );
 
                         Widget buildHandle() {
-                          final color = Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.55);
+                          final color = Theme.of(
+                            context,
+                          ).colorScheme.onSurfaceVariant.withOpacity(0.55);
                           return SizedBox(
                             width: 28,
                             height: 52,
@@ -1212,7 +1227,9 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: List.generate(3, (i) {
                                   return Padding(
-                                    padding: EdgeInsets.only(bottom: i == 2 ? 0 : 5),
+                                    padding: EdgeInsets.only(
+                                      bottom: i == 2 ? 0 : 5,
+                                    ),
                                     child: Container(
                                       width: 16,
                                       height: 2.2,

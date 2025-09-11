@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'social_blocker.dart';
 import 'stats.dart';
@@ -18,6 +19,7 @@ import 'timer_page.dart';
 import 'study_planner.dart';
 import 'screens/extended_task_list.dart';
 import 'habits.dart';
+import 'settings.dart';
 
 enum AuraHistoryView { day, month, year }
 
@@ -90,6 +92,11 @@ class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0;
   bool _isTimetableSetupInProgress = true;
 
+  static const _prefShowQuote = 'pref_show_quote';
+  static const _prefEnabledTabs = 'pref_enabled_tabs';
+
+  Set<String> _enabledTabs = {'habits', 'blocker', 'planner'};
+
   final bool _showAllTasks = false;
   final bool _showAllStudyTasks = false;
   List<Map<String, dynamic>> _todaysStudyPlan = [];
@@ -108,13 +115,12 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _apiService = ApiService(account: widget.account);
     _initializePageData();
+    _loadPreferences();
   }
 
   Future<void> _initializePageData() async {
     await _initApp();
-    if (mounted) {
-      //    _initPushNotifications();
-    }
+    if (mounted) {}
   }
 
   Future<void> _initApp() async {
@@ -787,73 +793,6 @@ class _HomePageState extends State<HomePage> {
     return auraDatesForView;
   }
 
-  /*  void _initPushNotifications() async {
-    await FirebaseMessaging.instance.requestPermission(
-      alert: true,
-      announcement: false,
-      badge: true,
-      carPlay: false,
-      criticalAlert: false,
-      provisional: false,
-      sound: true,
-    );
-
-    String? token;
-    try {
-      token = await FirebaseMessaging.instance.getToken();
-      if (mounted) {
-        setState(() {
-          _currentFcmToken = token;
-        });
-      }
-    } catch (e, s) {
-      print("Debug: _initPushNotifications: Exception caught: $e");
-      print("Debug: _initPushNotifications: Stacktrace: $s");
-      if (mounted) {
-        setState(() {
-          _currentFcmToken = null;
-        });
-      }
-      return;
-    }
-
-    if (token != null && _userProfile != null) {
-      final String? currentUserId = _userProfile!['userId'];
-      if (currentUserId != null) {
-        try {
-          Account authenticatedAccount = widget.account;
-          await authenticatedAccount.createPushTarget(
-            targetId: currentUserId,
-            identifier: token,
-            providerId: '682f36330001ecdab2e5',
-          );
-
-          print(
-            'FCM token $token successfully registered with Appwrite for user $currentUserId',
-          );
-        } catch (e) {
-          print('Error registering FCM token with Appwrite: $e');
-          if (e is AppwriteException) {
-            print(
-              'AppwriteException details: ${e.message}, code: ${e.code}, response: ${e.response}',
-            );
-          }
-        }
-      } else {
-        print(
-          "User ID is null in _initPushNotifications, cannot register FCM token with Appwrite.",
-        );
-      }
-    } else {
-      if (token == null) print("FCM token is null in _initPushNotifications.");
-      if (_userProfile == null) {
-        print(
-          "_userProfile is null in _initPushNotifications, cannot get User ID for FCM registration.",
-        );
-      }
-    }
-  }
-*/
   void _updateTimetableSetupState(bool isComplete) {
     if (mounted) {
       setState(() {
@@ -871,26 +810,85 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  @override
-  void dispose() {
-    super.dispose();
+  Future<void> _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final showQuote = prefs.getBool(_prefShowQuote);
+    final tabs = prefs.getStringList(_prefEnabledTabs);
+    if (mounted) {
+      setState(() {
+        if (showQuote != null) _showQuote = showQuote;
+        _enabledTabs = (tabs?.toSet() ?? {'habits', 'blocker', 'planner'})
+            .where((t) => {'habits', 'blocker', 'planner'}.contains(t))
+            .toSet();
+        if (_enabledTabs.isEmpty) {
+          _enabledTabs = {'habits'};
+        }
+        if (_selectedIndex >= _currentPagesAndKeys().$1.length) {
+          _selectedIndex = 0;
+        }
+      });
+    }
+  }
+
+  Future<void> _updateShowQuote(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefShowQuote, value);
+    if (mounted) setState(() => _showQuote = value);
+  }
+
+  Future<void> _updateEnabledTabs(Set<String> tabs) async {
+    final next = tabs.isEmpty ? {'habits'} : tabs;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_prefEnabledTabs, next.toList());
+    if (mounted) {
+      setState(() {
+        _enabledTabs = next;
+        final pages = _currentPagesAndKeys().$1;
+        if (_selectedIndex >= pages.length) _selectedIndex = 0;
+      });
+    }
+  }
+
+  (List<Widget>, List<String>) _currentPagesAndKeys() {
+    final pages = <Widget>[];
+    final keys = <String>[];
+
+    pages.add(_buildDashboardView());
+    keys.add('home');
+
+    if (_enabledTabs.contains('habits')) {
+      pages.add(HabitsPage(apiService: _apiService));
+      keys.add('habits');
+    }
+    if (_enabledTabs.contains('blocker')) {
+      pages.add(
+        SocialMediaBlockerScreen(
+          apiService: _apiService,
+          onChallengeCompleted: _fetchDataFromServer,
+        ),
+      );
+      keys.add('blocker');
+    }
+    if (_enabledTabs.contains('planner')) {
+      pages.add(
+        StudyPlannerScreen(
+          onSetupStateChanged: _updateTimetableSetupState,
+          apiService: _apiService,
+          onTaskCompleted: _fetchDataFromServer,
+        ),
+      );
+      keys.add('planner');
+    }
+
+    return (pages, keys);
   }
 
   @override
   Widget build(BuildContext context) {
-    final List<Widget> widgetOptions = <Widget>[
-      _buildDashboardView(),
-      HabitsPage(apiService: _apiService),
-      SocialMediaBlockerScreen(
-        apiService: _apiService,
-        onChallengeCompleted: _fetchDataFromServer,
-      ),
-      StudyPlannerScreen(
-        onSetupStateChanged: _updateTimetableSetupState,
-        apiService: _apiService,
-        onTaskCompleted: _fetchDataFromServer,
-      ),
-    ];
+    final (pages, keys) = _currentPagesAndKeys();
+    final plannerSelected =
+        keys.isNotEmpty && keys[_selectedIndex] == 'planner';
+    final showHeader = !(plannerSelected && _isTimetableSetupInProgress);
 
     return Scaffold(
       appBar: AppBar(
@@ -940,11 +938,37 @@ class _HomePageState extends State<HomePage> {
           ),
           IconButton(
             icon: Icon(
-              Icons.logout_rounded,
-              color: Theme.of(context).colorScheme.error,
+              Icons.settings_outlined,
+              color: Theme.of(context).colorScheme.primary,
             ),
-            onPressed: logout,
-            tooltip: 'Sign Out',
+            tooltip: 'Settings',
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => SettingsScreen(
+                    showQuote: _showQuote,
+                    enabledTabs: _enabledTabs,
+                    onShowQuoteChanged: _updateShowQuote,
+                    onEnabledTabsChanged: (tabs) async {
+                      if (tabs.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Keep at least one tab besides Home enabled.',
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                        return;
+                      }
+                      await _updateEnabledTabs(tabs);
+                    },
+                    onLogout: logout,
+                  ),
+                ),
+              );
+              if (mounted) setState(() {});
+            },
           ),
         ],
       ),
@@ -952,7 +976,7 @@ class _HomePageState extends State<HomePage> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                if (!(_selectedIndex == 3 && _isTimetableSetupInProgress))
+                if (showHeader)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
                     child: Align(
@@ -978,7 +1002,7 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                   ),
-                if (!(_selectedIndex == 3 && _isTimetableSetupInProgress))
+                if (showHeader)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24.0),
                     child: Row(
@@ -1000,13 +1024,9 @@ class _HomePageState extends State<HomePage> {
                       ],
                     ),
                   ),
-                if (!(_selectedIndex == 3 && _isTimetableSetupInProgress))
-                  const SizedBox(height: 16),
+                if (showHeader) const SizedBox(height: 16),
                 Expanded(
-                  child: IndexedStack(
-                    index: _selectedIndex,
-                    children: widgetOptions,
-                  ),
+                  child: IndexedStack(index: _selectedIndex, children: pages),
                 ),
               ],
             ),
@@ -1017,26 +1037,30 @@ class _HomePageState extends State<HomePage> {
           });
         },
         selectedIndex: _selectedIndex,
-        destinations: const <NavigationDestination>[
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             selectedIcon: Icon(Icons.home_rounded),
             icon: Icon(Icons.home_outlined),
             label: 'Home',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.repeat_outlined),
-            label: 'Habits',
-          ),
-          NavigationDestination(
-            selectedIcon: Icon(Icons.no_cell_rounded),
-            icon: Icon(Icons.no_cell_outlined),
-            label: 'Blocker',
-          ),
-          NavigationDestination(
-            selectedIcon: Icon(Icons.school_rounded),
-            icon: Icon(Icons.school_outlined),
-            label: 'Planner',
-          ),
+          if (_enabledTabs.contains('habits'))
+            const NavigationDestination(
+              selectedIcon: Icon(Icons.repeat_rounded),
+              icon: Icon(Icons.repeat_outlined),
+              label: 'Habits',
+            ),
+          if (_enabledTabs.contains('blocker'))
+            const NavigationDestination(
+              selectedIcon: Icon(Icons.no_cell_rounded),
+              icon: Icon(Icons.no_cell_outlined),
+              label: 'Blocker',
+            ),
+          if (_enabledTabs.contains('planner'))
+            const NavigationDestination(
+              selectedIcon: Icon(Icons.school_rounded),
+              icon: Icon(Icons.school_outlined),
+              label: 'Planner',
+            ),
         ],
       ),
       floatingActionButton: _selectedIndex == 0

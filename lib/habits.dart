@@ -17,35 +17,15 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   bool _loading = true;
   bool _updating = false;
   List<Map<String, dynamic>> _habits = [];
-  AnimationController? _holdController;
-  static const Duration _holdDuration = Duration(milliseconds: 700);
-  int? _holdingIndex;
-  Timer? _pressDelayTimer;
-  Offset? _pressStartPosition;
-  static const double _moveTolerance = 8.0;
   late AnimationController _bounceController;
   late Animation<double> _bounceScale;
   int? _completedIndex;
-  bool _holdTriggered = false;
-  bool _pointerMoved = false; // add this
+  AnimationController? _holdController;
+  int? _holdingIndex;
 
   @override
   void initState() {
     super.initState();
-    _holdController = AnimationController(vsync: this, duration: _holdDuration)
-      ..addListener(() {
-        if (mounted && _holdingIndex != null) setState(() {});
-      })
-      ..addStatusListener((s) {
-        if (s == AnimationStatus.completed && _holdingIndex != null) {
-          final idx = _holdingIndex!;
-          _holdTriggered = true;
-          final h = _habits[idx];
-          final id = (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '').toString();
-          if (id.isNotEmpty) _incrementCompleted(id, idx);
-          _resetHold();
-        }
-      });
     _bounceController =
         AnimationController(
           vsync: this,
@@ -101,19 +81,40 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         ),
       ]),
     );
+    _holdController =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 900),
+        )..addStatusListener((status) {
+          if (status == AnimationStatus.completed) {
+            if (_holdingIndex != null) {
+              final habit = _habits[_holdingIndex!];
+              final id =
+                  (habit[r'$id'] ?? habit['id'] ?? habit['habitId'] ?? '')
+                      .toString();
+              if (id.isNotEmpty) {
+                _incrementCompleted(id, _holdingIndex!);
+              }
+            }
+            _resetHold();
+          }
+        });
     _loadHabits();
   }
 
   @override
   void dispose() {
-    _pressDelayTimer?.cancel();
-    _holdController?.dispose();
     _bounceController.dispose();
+    _holdController?.dispose();
     super.dispose();
   }
 
+  void _startHold(int index) {
+    setState(() => _holdingIndex = index);
+    _holdController?.forward(from: 0);
+  }
+
   void _resetHold() {
-    _pressDelayTimer?.cancel();
     final c = _holdController;
     if (c != null) {
       c.stop();
@@ -122,21 +123,12 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     if (mounted) setState(() => _holdingIndex = null);
   }
 
-  void _startHoldAnimation(int index) {
-    final c = _holdController;
-    if (c == null) return;
-    _holdTriggered = false;
-    _pointerMoved = false;
-    setState(() => _holdingIndex = index);
-    c.forward(from: 0);
-  }
-
   Future<void> _loadHabits() async {
     setState(() => _loading = true);
     try {
       final list = await widget.apiService.getHabits();
       final normalized = <Map<String, dynamic>>[];
-      // In _loadHabits(), ensure completedDays stays a List<String>
+
       for (final h in list) {
         if (h is! Map) continue;
         final m = Map<String, dynamic>.from(h);
@@ -181,77 +173,16 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   }
 
   ShapeBorder _shapeForIndex(int i) {
-    switch (i % 6) {
-      case 0:
-        return RoundedRectangleBorder(
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(50),
-            bottomLeft: Radius.circular(50),
-            bottomRight: Radius.circular(16),
-          ),
-        );
-      case 1:
-        return RoundedRectangleBorder(borderRadius: BorderRadius.circular(40));
-      case 2:
-        return const ContinuousRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(60)),
-        );
-      case 3:
-        return BeveledRectangleBorder(borderRadius: BorderRadius.circular(24));
-      case 4:
-        return RoundedRectangleBorder(
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(50),
-            bottomRight: Radius.circular(50),
-          ),
-        );
-      default:
-        return RoundedRectangleBorder(borderRadius: BorderRadius.circular(28));
-    }
+    return RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0));
   }
 
   ({Color bg, Color fg}) _colorsForIndex(int i, ColorScheme s) {
-    Color elevate(Color surface, Color accent) {
-      final base = (surface.alpha == 0 || surface.opacity < 0.05)
-          ? s.surface
-          : surface;
-      return Color.alphaBlend(accent.withOpacity(0.12), base);
-    }
-
-    switch (i % 5) {
-      case 0:
-        return (
-          bg: elevate(s.secondaryContainer, s.secondary),
-          fg: s.onSecondaryContainer,
-        );
-      case 1:
-        return (
-          bg: elevate(s.primaryContainer, s.primary),
-          fg: s.onPrimaryContainer,
-        );
-      case 2:
-        return (
-          bg: elevate(s.tertiaryContainer, s.tertiary),
-          fg: s.onTertiaryContainer,
-        );
-      case 3:
-        return (
-          bg: elevate(s.surfaceContainerHighest, s.primary),
-          fg: s.onSurfaceVariant,
-        );
-      default:
-        return (
-          bg: elevate(s.surfaceContainerHigh, s.secondary),
-          fg: s.onSurface,
-        );
-    }
+    return (bg: s.surfaceContainer, fg: s.onSurface);
   }
 
-  // Replace _incrementCompleted with:
   Future<void> _incrementCompleted(String habitId, int index) async {
     if (_updating) return;
-    _updating = true;
+    setState(() => _updating = true);
     final habit = _habits[index];
     final prevCount = habit['completedTimes'] as int? ?? 0;
     final prevDays = List<String>.from(
@@ -266,8 +197,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     if (!updatedDays.contains(todayStr)) {
       updatedDays.add(todayStr);
     } else {
-      // Already completed today: do nothing and exit
-      _updating = false;
+      setState(() => _updating = false);
       return;
     }
 
@@ -300,7 +230,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
       }
     } finally {
-      _updating = false;
+      if (mounted) setState(() => _updating = false);
     }
   }
 
@@ -333,9 +263,13 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   int _computeStreak(Set<DateTime> completedSet) {
     if (completedSet.isEmpty) return 0;
     final today = _dateOnly(DateTime.now());
-    if (!completedSet.contains(today)) return 0;
+    final yesterday = today.subtract(const Duration(days: 1));
+
+    if (!completedSet.contains(today) && !completedSet.contains(yesterday)) {
+      return 0;
+    }
     int streak = 0;
-    var cursor = today;
+    var cursor = completedSet.contains(today) ? today : yesterday;
     while (completedSet.contains(cursor)) {
       streak++;
       cursor = cursor.subtract(const Duration(days: 1));
@@ -390,233 +324,271 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     );
     final consistencyStr =
         '${consistencyPct.toStringAsFixed(consistencyPct >= 10 ? 0 : 1)}%';
-    final daysInMonth = DateUtils.getDaysInMonth(now.year, now.month);
+    final totalCompletions = habit['completedTimes'] as int? ?? 0;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (ctx) {
         DateTime calMonth = DateTime(now.year, now.month);
-        return SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _habitSentence(habit, cs),
-                const SizedBox(height: 18),
-                StatefulBuilder(
-                  builder: (calCtx, setCalState) {
-                    return _HabitCalendar(
-                      month: calMonth,
-                      completed: completedSet,
-                      created: createdDate,
-                      onChange: (m) => setCalState(() {
-                        calMonth = DateTime(m.year, m.month);
-                      }),
-                      cs: cs,
-                    );
-                  },
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _metricBox(
-                        title: 'Streak',
-                        value: streakStr,
-                        icon: Icons.local_fire_department_rounded,
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.58,
+          minChildSize: 0.40,
+          maxChildSize: 0.94,
+          builder: (context, scrollController) => SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              controller: scrollController,
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _habitSentence(habit, cs),
+                  const SizedBox(height: 18),
+                  StatefulBuilder(
+                    builder: (calCtx, setCalState) {
+                      return _HabitCalendar(
+                        month: calMonth,
+                        completed: completedSet,
+                        created: createdDate,
+                        onChange: (m) => setCalState(() {
+                          calMonth = DateTime(m.year, m.month);
+                        }),
                         cs: cs,
-                        iconColor: cs.primary,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _metricBox(
+                          title: 'Streak',
+                          value: streakStr,
+                          icon: Icons.local_fire_department_rounded,
+                          cs: cs,
+                          iconColor: cs.primary,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _metricBox(
-                        title: 'Consistency',
-                        value: consistencyStr,
-                        icon: Icons.insights_rounded,
-                        cs: cs,
-                        iconColor: cs.tertiary,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _metricBox(
+                          title: 'Consistency',
+                          value: consistencyStr,
+                          icon: Icons.insights_rounded,
+                          cs: cs,
+                          iconColor: cs.tertiary,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _reminderBox(habit, cs),
-                const SizedBox(height: 12),
-                _metricBox(
-                  title: 'Added',
-                  value: _formatDate(createdDate),
-                  icon: Icons.event_available_rounded,
-                  cs: cs,
-                  iconColor: cs.primary,
-                ),
-                const SizedBox(height: 28),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          final id =
-                              (habit[r'$id'] ??
-                                      habit['id'] ??
-                                      habit['habitId'] ??
-                                      '')
-                                  .toString();
-                          if (id.isEmpty) return;
-                          final confirm = await showDialog<bool>(
-                            context: ctx,
-                            barrierDismissible: true,
-                            builder: (dCtx) {
-                              final cs2 = Theme.of(dCtx).colorScheme;
-                              return AlertDialog(
-                                backgroundColor: cs2.surfaceContainerHigh,
-                                surfaceTintColor: Colors.transparent,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                title: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.delete_outline_rounded,
-                                      color: cs2.error,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        'Delete habit?',
-                                        style: GoogleFonts.gabarito(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.w700,
-                                          color: cs2.onSurface,
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _metricBox(
+                          title: 'Completed',
+                          value: '$totalCompletions times',
+                          icon: Icons.done_all,
+                          cs: cs,
+                          iconColor: cs.secondary,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _metricBox(
+                          title: 'Added',
+                          valueWidget: _MarqueeText(
+                            text: _formatDate(createdDate),
+                            style: GoogleFonts.gabarito(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: cs.onSurface,
+                            ),
+                          ),
+                          icon: Icons.event_available_rounded,
+                          cs: cs,
+                          iconColor: cs.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _reminderBox(habit, cs),
+                  const SizedBox(height: 28),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final id =
+                                (habit[r'$id'] ??
+                                        habit['id'] ??
+                                        habit['habitId'] ??
+                                        '')
+                                    .toString();
+                            if (id.isEmpty) return;
+                            final confirm = await showDialog<bool>(
+                              context: ctx,
+                              barrierDismissible: true,
+                              builder: (dCtx) {
+                                final cs2 = Theme.of(dCtx).colorScheme;
+                                return AlertDialog(
+                                  backgroundColor: cs2.surfaceContainerHigh,
+                                  surfaceTintColor: Colors.transparent,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  title: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.delete_outline_rounded,
+                                        color: cs2.error,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          'Delete habit?',
+                                          style: GoogleFonts.gabarito(
+                                            fontSize: 20,
+                                            fontWeight: FontWeight.w700,
+                                            color: cs2.onSurface,
+                                          ),
                                         ),
                                       ),
+                                    ],
+                                  ),
+                                  content: Text(
+                                    'This will remove the habit and its progress. This action cannot be undone.',
+                                    style: GoogleFonts.gabarito(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                      height: 1.3,
+                                      color: cs2.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  actionsPadding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    0,
+                                    16,
+                                    12,
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: cs2.onSurfaceVariant,
+                                        textStyle: GoogleFonts.gabarito(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      onPressed: () =>
+                                          Navigator.pop(dCtx, false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    FilledButton.tonal(
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: cs2.errorContainer,
+                                        foregroundColor: cs2.error,
+                                        textStyle: GoogleFonts.gabarito(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 18,
+                                          vertical: 12,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                        ),
+                                      ),
+                                      onPressed: () =>
+                                          Navigator.pop(dCtx, true),
+                                      child: const Text('Delete'),
                                     ),
                                   ],
-                                ),
-                                content: Text(
-                                  'This will remove the habit and its progress. This action cannot be undone.',
-                                  style: GoogleFonts.gabarito(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
-                                    height: 1.3,
-                                    color: cs2.onSurfaceVariant,
-                                  ),
-                                ),
-                                actionsPadding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  0,
-                                  16,
-                                  12,
-                                ),
-                                actions: [
-                                  TextButton(
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: cs2.onSurfaceVariant,
-                                      textStyle: GoogleFonts.gabarito(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    onPressed: () => Navigator.pop(dCtx, false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  FilledButton.tonal(
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: cs2.errorContainer,
-                                      foregroundColor: cs2.error,
-                                      textStyle: GoogleFonts.gabarito(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 18,
-                                        vertical: 12,
-                                      ),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(14),
-                                      ),
-                                    ),
-                                    onPressed: () => Navigator.pop(dCtx, true),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              );
-                            },
-                          );
-                          if (confirm != true) return;
-                          Navigator.of(ctx).pop();
-                          try {
-                            await widget.apiService.deleteHabit(id);
-                            if (mounted) {
-                              setState(() {
-                                _habits.removeWhere(
-                                  (h) =>
-                                      (h[r'$id'] ??
-                                              h['id'] ??
-                                              h['habitId'] ??
-                                              '')
-                                          .toString() ==
-                                      id,
                                 );
-                              });
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Habit deleted')),
-                              );
+                              },
+                            );
+                            if (confirm != true) return;
+                            Navigator.of(ctx).pop();
+                            try {
+                              await widget.apiService.deleteHabit(id);
+                              if (mounted) {
+                                setState(() {
+                                  _habits.removeWhere(
+                                    (h) =>
+                                        (h[r'$id'] ??
+                                                h['id'] ??
+                                                h['habitId'] ??
+                                                '')
+                                            .toString() ==
+                                        id,
+                                  );
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Habit deleted'),
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Delete failed: $e')),
+                                );
+                              }
                             }
-                          } catch (e) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Delete failed: $e')),
-                              );
-                            }
-                          }
-                        },
-                        icon: Icon(
-                          Icons.delete_outline_rounded,
-                          color: cs.error,
-                        ),
-                        label: Text(
-                          'Delete',
-                          style: GoogleFonts.gabarito(
-                            fontWeight: FontWeight.w600,
+                          },
+                          icon: Icon(
+                            Icons.delete_outline_rounded,
                             color: cs.error,
                           ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: cs.error,
-                          side: BorderSide(
-                            color: cs.error.withOpacity(0.55),
-                            width: 1.2,
+                          label: Text(
+                            'Delete',
+                            style: GoogleFonts.gabarito(
+                              fontWeight: FontWeight.w600,
+                              color: cs.error,
+                            ),
                           ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          backgroundColor: cs.error.withOpacity(0.05),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () {},
-                        icon: const Icon(Icons.edit_rounded),
-                        label: const Text('Edit'),
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: cs.error,
+                            side: BorderSide(
+                              color: cs.error.withOpacity(0.55),
+                              width: 1.2,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            backgroundColor: cs.error.withOpacity(0.05),
                           ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () {},
+                          icon: const Icon(Icons.edit_rounded),
+                          label: const Text('Edit'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -626,12 +598,12 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
 
   DateTime? _parseHabitDate(Map<String, dynamic> habit) {
     final candidates = [
-      habit[r'$createdAt'], // Appwrite document field
+      habit[r'$createdAt'],
       habit['createdAt'],
       habit['created_at'],
       habit['timestamp'],
       habit['created'],
-      habit[r'$updatedAt'], // fallback if created missing
+      habit[r'$updatedAt'],
     ];
     for (final c in candidates) {
       if (c == null) continue;
@@ -815,7 +787,8 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
 
   Widget _metricBox({
     required String title,
-    required String value,
+    String? value,
+    Widget? valueWidget,
     required IconData icon,
     required ColorScheme cs,
     required Color iconColor,
@@ -852,14 +825,18 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: GoogleFonts.gabarito(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: cs.onSurface,
-                  ),
-                ),
+                valueWidget != null
+                    ? SizedBox(width: double.infinity, child: valueWidget)
+                    : Text(
+                        value ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.gabarito(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurface,
+                        ),
+                      ),
               ],
             ),
           ),
@@ -906,180 +883,187 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   }
 
   Widget _habitCard(Map<String, dynamic> h, int index, ColorScheme scheme) {
-    final c = _holdController;
-    final holding = _holdingIndex == index && c != null;
-    final progress = holding ? c.value : 0.0;
     final id = (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '').toString();
     final name = (h['habitName'] ?? h['habit'] ?? '').toString();
     final goal = (h['habitGoal'] ?? h['goal'] ?? '').toString();
-    final reminders = (h['habitReminder'] is List)
-        ? List<String>.from(
-            (h['habitReminder'] as List).map((e) => e.toString()),
-          )
-        : const <String>[];
+    final totalCompletions = h['completedTimes'] as int? ?? 0;
+
+    final todayKey = DateTime.now().toUtc();
+    final todayStr =
+        '${todayKey.year.toString().padLeft(4, '0')}-${todayKey.month.toString().padLeft(2, '0')}-${todayKey.day.toString().padLeft(2, '0')}';
+
+    List<String> completedDaysRaw = [];
+    if (h['completedDays'] is List) {
+      completedDaysRaw = List<String>.from(h['completedDays']);
+    }
+    final completedToday = completedDaysRaw.contains(todayStr);
+
+    final completedDates = completedDaysRaw
+        .map((s) {
+          try {
+            return DateTime.parse(s);
+          } catch (_) {
+            return null;
+          }
+        })
+        .whereType<DateTime>()
+        .map(_dateOnly)
+        .toSet();
+    final streak = _computeStreak(completedDates);
+
     final colorPair = _colorsForIndex(index, scheme);
     final shape = _shapeForIndex(index);
-    final showReminder = _hasReminderToday(reminders);
-    final reminderTime = showReminder ? _todayReminderTime(reminders) : null;
+    final BorderRadius radius =
+        (shape is RoundedRectangleBorder && shape.borderRadius is BorderRadius)
+        ? (shape.borderRadius as BorderRadius)
+        : BorderRadius.circular(16);
+
     return AnimatedBuilder(
       animation: _bounceController,
       builder: (context, child) {
         double scale = 1.0;
-        if (_completedIndex != null && index == _completedIndex) {
+        if (_completedIndex == index) {
           scale = 1.0 + _bounceScale.value;
         }
-        if (holding) scale *= (1 - (progress * 0.04));
         return Transform.scale(scale: scale, child: child);
       },
-      child: Listener(
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: (event) {
-          if (id.isEmpty) return;
-          _pointerMoved = false;
-          _pressStartPosition = event.position;
-          _pressDelayTimer?.cancel();
-          _pressDelayTimer = Timer(const Duration(milliseconds: 50), () {
-            if (_pressStartPosition != null && _holdingIndex == null) {
-              _startHoldAnimation(index);
-            }
-          });
-        },
-        onPointerMove: (event) {
-          if (_pressStartPosition == null) return;
-          final moved = (event.position - _pressStartPosition!).distance;
-          if (moved > _moveTolerance) {
-            _pointerMoved = true;
-            if (_holdingIndex != null) {
-              _resetHold();
-            } else {
-              _pressDelayTimer?.cancel();
-            }
-          }
-        },
-        onPointerUp: (_) {
-          final wasHold = _holdTriggered;
-          final moved = _pointerMoved;
-          _resetHold();
-          if (!wasHold && !moved) _showHabitDetails(h);
-        },
-        onPointerCancel: (_) {
-          _resetHold();
-        },
-        child: Material(
-          clipBehavior: Clip.antiAlias,
-          color: colorPair.bg,
-          elevation: 3,
-          shape: shape,
+      child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        clipBehavior: Clip.antiAlias,
+        color: colorPair.bg,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: radius,
+          side: BorderSide(color: scheme.outlineVariant.withOpacity(0.5)),
+        ),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _showHabitDetails(h),
+          onLongPressStart: (_) {
+            if (_updating || id.isEmpty) return;
+
+            if (index < 0 || index >= _habits.length) return;
+
+            final todayKey = DateTime.now().toUtc();
+            final todayStr =
+                '${todayKey.year.toString().padLeft(4, '0')}-${todayKey.month.toString().padLeft(2, '0')}-${todayKey.day.toString().padLeft(2, '0')}';
+            final raw = h['completedDays'];
+            final List<String> days = raw is List
+                ? raw.map((e) => e.toString()).toList()
+                : <String>[];
+            if (days.contains(todayStr)) return;
+
+            _startHold(index);
+          },
+          onLongPressEnd: (_) => _resetHold(),
+          onLongPressCancel: _resetHold,
           child: Stack(
             children: [
-              Positioned.fill(
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: FractionallySizedBox(
-                    heightFactor: progress,
-                    widthFactor: 1,
-                    child: Container(color: colorPair.fg.withOpacity(0.10)),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'I will',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.gabarito(
-                          fontSize: 12,
-                          color: colorPair.fg.withOpacity(0.8),
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        name,
-                        textAlign: TextAlign.center,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.gabarito(
-                          fontSize: 20,
-                          height: 1.1,
-                          fontWeight: FontWeight.w800,
-                          color: colorPair.fg,
-                          letterSpacing: -0.4,
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        'to become',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.gabarito(
-                          fontSize: 12,
-                          color: colorPair.fg.withOpacity(0.72),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: colorPair.fg.withOpacity(0.10),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          goal,
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.gabarito(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: colorPair.fg,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                      if (reminderTime != null)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: colorPair.fg.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            reminderTime,
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.gabarito(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: colorPair.fg,
+              if (_holdController != null)
+                Positioned.fill(
+                  child: AnimatedBuilder(
+                    animation: _holdController!,
+                    builder: (context, _) {
+                      final isActive = _holdingIndex == index;
+                      final v = isActive ? _holdController!.value : 0.0;
+                      return Align(
+                        alignment: Alignment.bottomCenter,
+                        child: FractionallySizedBox(
+                          widthFactor: 1.0,
+                          heightFactor: v.clamp(0.0, 1.0),
+                          child: ClipRRect(
+                            borderRadius: radius,
+                            child: Container(
+                              color: scheme.primary.withOpacity(0.22),
                             ),
                           ),
                         ),
-                      if (reminderTime != null) const SizedBox(height: 4),
-                      Text(
-                        'Completed: ${h['completedTimes']}',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.gabarito(
-                          fontSize: 10,
-                          color: colorPair.fg.withOpacity(0.55),
-                        ),
-                      ),
-                    ],
+                      );
+                    },
                   ),
+                ),
+
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 16,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'I will',
+                            style: GoogleFonts.gabarito(
+                              fontSize: 13,
+                              color: colorPair.fg.withOpacity(0.8),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            name,
+                            style: GoogleFonts.gabarito(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w700,
+                              color: colorPair.fg,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          if (goal.isNotEmpty) const SizedBox(height: 6),
+                          if (goal.isNotEmpty)
+                            RichText(
+                              text: TextSpan(
+                                style: GoogleFonts.gabarito(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                children: [
+                                  TextSpan(
+                                    text: 'to become ',
+                                    style: TextStyle(
+                                      color: colorPair.fg.withOpacity(0.8),
+                                    ),
+                                  ),
+                                  TextSpan(
+                                    text: goal,
+                                    style: TextStyle(
+                                      color: colorPair.fg,
+                                      decoration: TextDecoration.underline,
+                                      decorationColor: scheme.primary
+                                          .withOpacity(0.8),
+                                      decorationStyle: TextDecorationStyle.wavy,
+                                      decorationThickness: 1.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Row(
+                      children: [
+                        _StatBadge(
+                          value: streak,
+                          icon: Icons.local_fire_department_outlined,
+                          color: scheme.primary,
+                          textColor: colorPair.fg,
+                        ),
+                        const SizedBox(width: 12),
+                        _StatBadge(
+                          value: totalCompletions,
+                          icon: Icons.done_all_outlined,
+                          color: scheme.tertiary,
+                          textColor: colorPair.fg,
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1128,17 +1112,11 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
             )
           : RefreshIndicator(
               onRefresh: _loadHabits,
-              child: GridView.builder(
+              child: ListView.builder(
                 physics: const BouncingScrollPhysics(
                   parent: AlwaysScrollableScrollPhysics(),
                 ),
-                padding: const EdgeInsets.fromLTRB(16, 20, 16, 120),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                  childAspectRatio: 0.7,
-                ),
+                padding: const EdgeInsets.fromLTRB(0, 12, 0, 120),
                 itemCount: _habits.length,
                 itemBuilder: (context, index) =>
                     _habitCard(_habits[index], index, scheme),
@@ -1159,6 +1137,48 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         icon: const Icon(Icons.add),
         label: const Text('Add Habit'),
       ),
+    );
+  }
+}
+
+class _StatBadge extends StatelessWidget {
+  final int value;
+  final IconData icon;
+  final Color color;
+  final Color textColor;
+
+  const _StatBadge({
+    required this.value,
+    required this.icon,
+    required this.color,
+    required this.textColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final iconColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          child: Icon(icon, size: 22, color: iconColor),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '$value',
+          style: GoogleFonts.gabarito(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: textColor.withOpacity(0.9),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1325,5 +1345,102 @@ class _HabitCalendar extends StatelessWidget {
       'December',
     ];
     return full[m - 1];
+  }
+}
+
+class _MarqueeText extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+
+  const _MarqueeText({required this.text, required this.style});
+
+  @override
+  State<_MarqueeText> createState() => _MarqueeTextState();
+}
+
+class _MarqueeTextState extends State<_MarqueeText>
+    with SingleTickerProviderStateMixin {
+  late ScrollController _scrollController;
+  late AnimationController _animationController;
+  bool _needsScroll = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+    _animationController =
+        AnimationController(vsync: this, duration: const Duration(seconds: 3))
+          ..addStatusListener((status) {
+            if (status == AnimationStatus.completed) {
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) _animationController.reverse();
+              });
+            } else if (status == AnimationStatus.dismissed) {
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) _animationController.forward();
+              });
+            }
+          });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkIfScrollIsNeeded();
+      if (_needsScroll) {
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted) _animationController.forward();
+        });
+      }
+    });
+  }
+
+  void _checkIfScrollIsNeeded() {
+    if (!_scrollController.hasClients) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    if (maxScroll > 0) {
+      setState(() => _needsScroll = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (ctx, constraints) {
+        return ClipRect(
+          child: SizedBox(
+            width: constraints.maxWidth,
+            child: AnimatedBuilder(
+              animation: _animationController,
+              builder: (context, child) {
+                if (_scrollController.hasClients && _needsScroll) {
+                  final pos =
+                      _animationController.value *
+                      _scrollController.position.maxScrollExtent;
+                  _scrollController.jumpTo(pos);
+                }
+                return child!;
+              },
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                controller: _scrollController,
+                physics: const NeverScrollableScrollPhysics(),
+                child: Text(
+                  widget.text,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.visible,
+                  style: widget.style,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 }
