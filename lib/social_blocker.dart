@@ -23,7 +23,8 @@ class SocialMediaBlockerScreen extends StatefulWidget {
       _SocialMediaBlockerScreenState();
 }
 
-class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen> {
+class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
+    with AutomaticKeepAliveClientMixin {
   final PageController _pageController = PageController();
   late ConfettiController _confettiController;
   final TextEditingController _durationController = TextEditingController(
@@ -44,6 +45,9 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen> {
   int? _blockerDays = 7;
   tz.TZDateTime? _calculatedEndDate;
   String? _durationErrorText;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -306,10 +310,17 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen> {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
+
+    super.build(context);
+
+    Widget body;
     if (_isChallengeFinished) {
-      return _buildFinishedView();
+      body = _buildFinishedView();
+    } else {
+      body = _isSetupComplete ? _buildProgressView() : _buildOnboardingView();
     }
-    return _isSetupComplete ? _buildProgressView() : _buildOnboardingView();
+
+    return Scaffold(body: body);
   }
 
   Widget _buildOnboardingView() {
@@ -657,7 +668,8 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen> {
         final d = remaining.inDays;
         final h = remaining.inHours % 24;
         final m = remaining.inMinutes % 60;
-        timeRemaining = '${d}d ${h}h ${m}m remaining';
+        timeRemaining =
+            '${d}d ${h}h ${m}m remaining until your social media password is shown';
       }
     }
 
@@ -704,6 +716,7 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen> {
         const SizedBox(height: 32),
         Text(
           timeRemaining,
+          textAlign: TextAlign.center,
           style: GoogleFonts.gabarito(
             fontSize: 22,
             color: Theme.of(context).colorScheme.onSurface,

@@ -10,6 +10,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:math' as math;
 
 import 'social_blocker.dart';
 import 'stats.dart';
@@ -93,6 +94,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   int _selectedIndex = 0;
   bool _isTimetableSetupInProgress = true;
 
+  final GlobalKey<State<StatefulWidget>> _habitsKey =
+      GlobalKey<State<StatefulWidget>>();
+  final GlobalKey<State<StatefulWidget>> _blockerKey =
+      GlobalKey<State<StatefulWidget>>();
+  final GlobalKey<State<StatefulWidget>> _plannerKey =
+      GlobalKey<State<StatefulWidget>>();
+
   static const _prefShowQuote = 'pref_show_quote';
   static const _prefEnabledTabs = 'pref_enabled_tabs';
 
@@ -126,6 +134,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Timer? _auraChipTimer;
   bool _showAuraAsText = false;
+
+  bool _titleShowHello = true;
+  Timer? _helloTitleTimer;
 
   @override
   void initState() {
@@ -216,12 +227,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           }
         });
 
-    _auraChipTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+    _auraChipTimer = Timer.periodic(const Duration(seconds: 8), (timer) {
       if (!mounted) return;
       setState(() => _showAuraAsText = true);
       Future.delayed(const Duration(seconds: 1), () {
         if (mounted) setState(() => _showAuraAsText = false);
       });
+    });
+
+    _helloTitleTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _titleShowHello = false);
     });
   }
 
@@ -230,6 +245,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _bounceController.dispose();
     _holdController?.dispose();
     _auraChipTimer?.cancel();
+    _helloTitleTimer?.cancel();
     super.dispose();
   }
 
@@ -1006,16 +1022,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     switch (key) {
       case 'habits':
         return HabitsPage(
+          key: _habitsKey,
           apiService: _apiService,
           initialHabits: _preloadedHabits,
         );
       case 'blocker':
         return SocialMediaBlockerScreen(
+          key: _blockerKey,
           apiService: _apiService,
           onChallengeCompleted: _fetchDataFromServer,
         );
       case 'planner':
         return StudyPlannerScreen(
+          key: _plannerKey,
           onSetupStateChanged: _updateTimetableSetupState,
           apiService: _apiService,
           onTaskCompleted: _fetchDataFromServer,
@@ -1027,12 +1046,36 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  double _measureTextWidth(BuildContext context, String text, TextStyle style) {
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: style),
+      maxLines: 1,
+      textDirection: Directionality.of(context),
+    )..layout(minWidth: 0, maxWidth: double.infinity);
+    return tp.size.width;
+  }
+
   @override
   Widget build(BuildContext context) {
     final keys = _currentTabKeys();
     final selectedKey = keys[_selectedIndex];
     final plannerSelected = selectedKey == 'planner';
     final showHeader = !(plannerSelected && _isTimetableSetupInProgress);
+
+    final chipTextStyle = GoogleFonts.gabarito(
+      fontWeight: FontWeight.w600,
+      color: Theme.of(context).colorScheme.onSurface,
+    );
+    final currentAuraText = _showAuraAsText ? 'Aura' : '$aura';
+    final baseWidth = _measureTextWidth(context, 'Aura', chipTextStyle);
+    final currentWidth = _measureTextWidth(
+      context,
+      currentAuraText,
+      chipTextStyle,
+    );
+    final labelWidth = math.max(baseWidth, currentWidth);
+
+    final leadingW = labelWidth + 72;
 
     return Scaffold(
       appBar: AppBar(
@@ -1042,50 +1085,57 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           padding: const EdgeInsets.only(left: 16.0),
           child: Chip(
             shape: const StadiumBorder(),
+            backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+            side: BorderSide(
+              color: Theme.of(
+                context,
+              ).colorScheme.outlineVariant.withOpacity(0.5),
+            ),
             avatar: Icon(
               Icons.auto_awesome_rounded,
               color: Theme.of(context).colorScheme.primary,
               size: 20,
             ),
-            label: SizedBox(
-              width: 48,
+            labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+
+            label: ConstrainedBox(
+              constraints: BoxConstraints(minWidth: baseWidth),
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 400),
-                transitionBuilder: (Widget child, Animation<double> animation) {
-                  return FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0.0, 0.5),
-                        end: Offset.zero,
-                      ).animate(animation),
-                      child: child,
-                    ),
-                  );
-                },
+                transitionBuilder: (child, animation) => FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0.0, 0.5),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                ),
                 child: Text(
-                  _showAuraAsText ? 'Aura' : '$aura',
+                  currentAuraText,
                   key: ValueKey<bool>(_showAuraAsText),
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.gabarito(
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
+                  style: chipTextStyle,
                 ),
               ),
             ),
-            backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
-            side: BorderSide.none,
           ),
         ),
-        leadingWidth: 120,
-        title: Text(
-          'AurAchieve',
-          style: GoogleFonts.ebGaramond(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-            letterSpacing: 1.2,
+        leadingWidth: leadingW,
+        title: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 350),
+          transitionBuilder: (child, anim) =>
+              FadeTransition(opacity: anim, child: child),
+          child: Text(
+            _titleShowHello ? 'Hello.' : 'AurAchieve',
+            key: ValueKey<bool>(_titleShowHello),
+            style: GoogleFonts.ebGaramond(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              letterSpacing: 1.2,
+            ),
           ),
         ),
         centerTitle: true,
@@ -1159,55 +1209,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
       body: Column(
         children: [
-          if (showHeader)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: RichText(
-                  text: TextSpan(
-                    style: GoogleFonts.ebGaramond(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                    children: [
-                      const TextSpan(text: 'Hi, '),
-                      TextSpan(
-                        text: userName,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                      ),
-                      const TextSpan(text: '!'),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          if (showHeader)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.auto_awesome_rounded,
-                    color: Theme.of(context).colorScheme.primary,
-                    size: 26,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Your Aura: $aura',
-                    style: GoogleFonts.gabarito(
-                      fontSize: 18,
-                      color: Theme.of(context).colorScheme.onSurface,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (showHeader) const SizedBox(height: 16),
+          if (showHeader) const SizedBox(height: 8),
           Expanded(
             child: selectedKey == 'home'
                 ? (isLoading
@@ -1218,41 +1220,49 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ],
       ),
       bottomNavigationBar: NavigationBar(
-        onDestinationSelected: (int index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
         selectedIndex: _selectedIndex,
-        destinations: [
-          const NavigationDestination(
-            selectedIcon: Icon(Icons.home_rounded),
-            icon: Icon(Icons.home_outlined),
-            label: 'Home',
-          ),
-          if (_enabledTabs.contains('habits'))
-            const NavigationDestination(
-              selectedIcon: Icon(Icons.repeat_rounded),
-              icon: Icon(Icons.repeat_outlined),
-              label: 'Habits',
-            ),
-          if (_enabledTabs.contains('blocker'))
-            const NavigationDestination(
-              selectedIcon: Icon(Icons.no_cell_rounded),
-              icon: Icon(Icons.no_cell_outlined),
-              label: 'Blocker',
-            ),
-          if (_enabledTabs.contains('planner'))
-            const NavigationDestination(
-              selectedIcon: Icon(Icons.school_rounded),
-              icon: Icon(Icons.school_outlined),
-              label: 'Planner',
-            ),
-        ],
+        onDestinationSelected: (i) {
+          final keys = _currentTabKeys();
+          if (i >= 0 && i < keys.length) {
+            setState(() => _selectedIndex = i);
+          }
+        },
+        destinations: _currentTabKeys().map((key) {
+          switch (key) {
+            case 'home':
+              return const NavigationDestination(
+                icon: Icon(Icons.space_dashboard_outlined),
+                selectedIcon: Icon(Icons.space_dashboard),
+                label: 'Home',
+              );
+            case 'habits':
+              return const NavigationDestination(
+                icon: Icon(Icons.checklist_rtl_outlined),
+                selectedIcon: Icon(Icons.checklist_rtl_rounded),
+                label: 'Habits',
+              );
+            case 'blocker':
+              return const NavigationDestination(
+                icon: Icon(Icons.app_blocking_outlined),
+                selectedIcon: Icon(Icons.app_blocking_rounded),
+                label: 'Blocker',
+              );
+            case 'planner':
+              return const NavigationDestination(
+                icon: Icon(Icons.edit_calendar_outlined),
+                selectedIcon: Icon(Icons.edit_calendar_rounded),
+                label: 'Planner',
+              );
+            default:
+              return const NavigationDestination(
+                icon: Icon(Icons.circle_outlined),
+                label: '',
+              );
+          }
+        }).toList(),
       ),
       floatingActionButton: _selectedIndex == 0
           ? FloatingActionButton.extended(
-              heroTag: 'add_task_fab',
               onPressed: _addTask,
               icon: const Icon(Icons.add_rounded),
               label: const Text('Add Task'),
@@ -1720,13 +1730,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                itemCount: pendingTasks.length > 4 ? 4 : pendingTasks.length,
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: crossAxisCount,
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 12,
-                  childAspectRatio: 1.1,
+                  childAspectRatio: 1.0,
                 ),
+                itemCount: pendingTasks.length > 4 ? 4 : pendingTasks.length,
                 itemBuilder: (context, index) {
                   final task = pendingTasks[index];
                   final originalTaskIndex = tasks.indexOf(task);
@@ -1846,6 +1856,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _buildTaskCard(Task task, int originalTaskIndex) {
+    const int maxTitleChars = 30;
+    final String displayTitle = task.name.length > maxTitleChars
+        ? '${task.name.substring(0, maxTitleChars)}...'
+        : task.name;
+
     return Hero(
       tag: 'task_hero_${task.id}',
       child: Material(
@@ -1875,12 +1890,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           child: Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(10),
+              color: Theme.of(context).colorScheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(
                 color: Theme.of(
                   context,
-                ).colorScheme.outlineVariant.withValues(alpha: 0.3),
+                ).colorScheme.outlineVariant.withOpacity(0.3),
                 width: 1.5,
               ),
             ),
@@ -1890,7 +1905,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 _buildTaskIcon(task, context),
                 const SizedBox(height: 12),
                 Text(
-                  task.name,
+                  displayTitle,
                   style: GoogleFonts.gabarito(
                     fontSize: 15,
                     fontWeight: FontWeight.w500,
@@ -1900,34 +1915,78 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const Spacer(),
-                Row(
-                  children: [
-                    Text(
-                      _capitalize(task.type),
-                      style: GoogleFonts.gabarito(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: task.type == 'bad'
-                            ? Theme.of(context).colorScheme.error
-                            : Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      "(${_capitalize(task.intensity)})",
-                      style: GoogleFonts.gabarito(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
+                _buildCompactSubtitle(task, context),
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildCompactSubtitle(Task task, BuildContext context) {
+    final theme = Theme.of(context);
+
+    if (task.type == "bad") {
+      return Row(
+        children: [
+          Text(
+            "${_capitalize(task.type)} (${_capitalize(task.intensity)})",
+            style: GoogleFonts.gabarito(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.error,
+            ),
+          ),
+        ],
+      );
+    } else if (task.taskCategory == 'timed') {
+      return Row(
+        children: [
+          Text(
+            _capitalize(task.intensity),
+            style: GoogleFonts.gabarito(
+              fontSize: 13,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Icon(
+            Icons.timer_outlined,
+            size: 14,
+            color: theme.colorScheme.secondary,
+          ),
+          const SizedBox(width: 2),
+          Text(
+            task.durationMinutes != null ? "${task.durationMinutes} min" : "",
+            style: GoogleFonts.gabarito(
+              fontSize: 12,
+              color: theme.colorScheme.secondary.withOpacity(0.8),
+            ),
+          ),
+        ],
+      );
+    } else {
+      return Row(
+        children: [
+          Text(
+            _capitalize(task.intensity),
+            style: GoogleFonts.gabarito(
+              fontSize: 13,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Icon(
+            task.isImageVerifiable
+                ? Icons.camera_alt_outlined
+                : Icons.check_circle_outline,
+            size: 14,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ],
+      );
+    }
   }
 
   String _todayDateStringLocal() {
@@ -2279,6 +2338,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _capitalize(task.intensity),
           style: GoogleFonts.gabarito(
             fontSize: 13,
+            fontWeight: FontWeight.w600,
             color: Theme.of(context).colorScheme.primary,
           ),
         ),
