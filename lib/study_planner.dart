@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'dart:convert';
 
 import 'widgets/dynamic_color_svg.dart';
 import 'api_service.dart';
@@ -63,12 +64,14 @@ class StudyPlannerScreen extends StatefulWidget {
   final Function(bool) onSetupStateChanged;
   final ApiService apiService;
   final VoidCallback? onTaskCompleted;
+  final Map<String, dynamic>? initialStudyPlan;
 
   const StudyPlannerScreen({
     super.key,
     required this.onSetupStateChanged,
     required this.apiService,
     this.onTaskCompleted,
+    this.initialStudyPlan,
   });
 
   @override
@@ -110,10 +113,120 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
     Colors.cyan[200]!,
   ];
 
+  bool? _lastReportedSetupComplete;
+  bool _notifiedOnceAfterMount = false;
+
   @override
   void initState() {
     super.initState();
-    _loadTimetableData();
+
+    if (widget.initialStudyPlan != null) {
+      _parseAndSetPlan(widget.initialStudyPlan);
+    } else {
+      _loadTimetableData();
+    }
+  }
+
+  void _parseAndSetPlan(Map<String, dynamic>? plan) {
+    if (!mounted) return;
+
+    if (plan != null) {
+      List asList(dynamic v) {
+        if (v is List) return v;
+        if (v is Map) {
+          final c = v['data'] ?? v['items'] ?? v['documents'] ?? v['list'];
+          return c is List ? c : const [];
+        }
+        if (v is String) {
+          try {
+            final d = jsonDecode(v);
+            if (d is List) return d;
+            if (d is Map) {
+              final c = d['data'] ?? d['items'] ?? d['documents'] ?? d['list'];
+              return c is List ? c : const [];
+            }
+          } catch (_) {}
+        }
+        return const [];
+      }
+
+      _setStateIfMounted(() {
+        _studyPlan = plan;
+        _isSetupComplete = true;
+
+        final subjectsJson = asList(plan['subjects']);
+        _subjects = subjectsJson
+            .map((s) => Subject.fromJson(s as Map<String, dynamic>))
+            .toList();
+
+        final chaptersRaw = plan['chapters'];
+        _chapters = {};
+        if (chaptersRaw is Map) {
+          final map = Map<String, dynamic>.from(chaptersRaw);
+          map.forEach((key, value) {
+            if (value is List) {
+              _chapters[key.toString()] = value
+                  .map(
+                    (e) => Map<String, String>.from(
+                      Map<String, dynamic>.from(e as Map),
+                    ),
+                  )
+                  .toList();
+            }
+          });
+        }
+
+        _deadline = DateTime.tryParse(plan['deadline']?.toString() ?? '');
+
+        final timetableList = asList(plan['timetable']);
+        _generatedTimetable = timetableList
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .map(
+              (e) => {
+                'date': (e['date'] as String),
+                'tasks': (e['tasks'] as List)
+                    .map((t) => Map<String, dynamic>.from(t as Map))
+                    .toList(),
+              },
+            )
+            .toList();
+      });
+    } else {
+      _setStateIfMounted(() {
+        _isSetupComplete = false;
+      });
+    }
+
+    _setStateIfMounted(() {
+      _isLoading = false;
+    });
+    if (_lastReportedSetupComplete != _isSetupComplete) {
+      _lastReportedSetupComplete = _isSetupComplete;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          widget.onSetupStateChanged(_isSetupComplete);
+        }
+      });
+    }
+  }
+
+  Future<void> _loadTimetableData() async {
+    _setStateIfMounted(() {
+      _isLoading = true;
+    });
+    try {
+      final plan = await widget.apiService.getStudyPlan();
+      _parseAndSetPlan(plan);
+    } catch (e) {
+      print('Error loading study plan: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load study plan: $e')),
+        );
+      }
+      _parseAndSetPlan(null);
+    }
   }
 
   void _setStateIfMounted(VoidCallback fn) {
@@ -216,73 +329,6 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
       if (entry.key.hasMatch(s)) return entry.value;
     }
     return Icons.subject;
-  }
-
-  Future<void> _loadTimetableData() async {
-    _setStateIfMounted(() {
-      _isLoading = true;
-    });
-    try {
-      final plan = await widget.apiService.getStudyPlan();
-      if (!mounted) return;
-
-      if (plan != null) {
-        _setStateIfMounted(() {
-          _studyPlan = plan;
-          _isSetupComplete = true;
-          final subjectsJson = plan['subjects'] as List;
-          _subjects = subjectsJson
-              .map((s) => Subject.fromJson(s as Map<String, dynamic>))
-              .toList();
-
-          _chapters = (plan['chapters'] as Map<String, dynamic>).map(
-            (key, value) => MapEntry(
-              key,
-              (value as List)
-                  .map((item) => Map<String, String>.from(item))
-                  .toList(),
-            ),
-          );
-
-          _deadline = DateTime.tryParse(plan['deadline']);
-
-          final timetableJson = plan['timetable'] as List;
-          _generatedTimetable = timetableJson
-              .map(
-                (e) => {
-                  'date': (e['date'] as String),
-                  'tasks': (e['tasks'] as List)
-                      .map((t) => Map<String, dynamic>.from(t))
-                      .toList(),
-                },
-              )
-              .toList();
-        });
-      } else {
-        _setStateIfMounted(() {
-          _isSetupComplete = false;
-        });
-      }
-    } catch (e) {
-      print('Error loading study plan: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load study plan: $e')),
-        );
-      }
-      if (mounted) {
-        _setStateIfMounted(() {
-          _isSetupComplete = false;
-        });
-      }
-    } finally {
-      if (!mounted) return;
-      _setStateIfMounted(() {
-        _isLoading = false;
-      });
-
-      if (mounted) widget.onSetupStateChanged(_isSetupComplete);
-    }
   }
 
   Future<void> _resetTimetable() async {
@@ -677,8 +723,8 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         onPressed: _resetTimetable,
         label: const Text('Reset'),
         icon: const Icon(Icons.refresh),
-        backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
-        foregroundColor: Theme.of(context).colorScheme.onTertiaryContainer,
+        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+        foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
       ),
     );
   }

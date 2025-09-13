@@ -5,6 +5,7 @@ import 'package:appwrite/models.dart' as models;
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -79,7 +80,7 @@ class Task {
   }
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String userName = 'User';
   bool isLoading = true;
   List<Task> tasks = [];
@@ -102,6 +103,7 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _todaysStudyPlan = [];
   List<Subject> _subjects = [];
   bool _isStudyPlanSetupComplete = false;
+  Map<String, dynamic>? _studyPlanMap;
   bool _showQuote = true;
 
   List<DateTime?> auraDatesForView = [];
@@ -110,25 +112,134 @@ class _HomePageState extends State<HomePage> {
   final _storage = const FlutterSecureStorage();
   String? _currentFcmToken;
 
+  List<dynamic> _preloadedHabits = [];
+
+  late AnimationController _bounceController;
+  late Animation<double> _bounceScale;
+  int? _completedIndex;
+  AnimationController? _holdController;
+  int? _holdingIndex;
+  bool _secondTickDone = false;
+  static const int _secondTickLeadMs = 180;
+
+  bool _refreshInFlight = false;
+
+  Timer? _auraChipTimer;
+  bool _showAuraAsText = false;
+
   @override
   void initState() {
     super.initState();
     _apiService = ApiService(account: widget.account);
     _initializePageData();
     _loadPreferences();
+
+    _bounceController =
+        AnimationController(
+            vsync: this,
+            duration: const Duration(milliseconds: 850),
+          )
+          ..addStatusListener((s) {
+            if (s == AnimationStatus.completed && mounted) {
+              setState(() => _completedIndex = null);
+            }
+          })
+          ..addListener(() {
+            if (_secondTickDone) return;
+            final total = _bounceController.duration?.inMilliseconds ?? 0;
+            final elapsed =
+                _bounceController.lastElapsedDuration?.inMilliseconds ?? 0;
+            if (total > 0 && elapsed >= (total - _secondTickLeadMs)) {
+              try {
+                HapticFeedback.selectionClick();
+              } catch (_) {}
+              _secondTickDone = true;
+            }
+          });
+
+    _bounceScale = _bounceController.drive(
+      TweenSequence<double>([
+        TweenSequenceItem(
+          tween: Tween(
+            begin: 0.0,
+            end: 0.12,
+          ).chain(CurveTween(curve: Curves.easeOut)),
+          weight: 20,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: 0.12,
+            end: -0.06,
+          ).chain(CurveTween(curve: Curves.easeIn)),
+          weight: 14,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: -0.06,
+            end: 0.04,
+          ).chain(CurveTween(curve: Curves.easeOut)),
+          weight: 12,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: 0.04,
+            end: -0.02,
+          ).chain(CurveTween(curve: Curves.easeInOut)),
+          weight: 10,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: -0.02,
+            end: 0.01,
+          ).chain(CurveTween(curve: Curves.easeOut)),
+          weight: 6,
+        ),
+      ]),
+    );
+
+    _holdController =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 900),
+        )..addStatusListener((status) {
+          if (status == AnimationStatus.completed) {
+            if (_holdingIndex != null) {
+              final habit = _preloadedHabits[_holdingIndex!];
+              final id =
+                  (habit[r'$id'] ?? habit['id'] ?? habit['habitId'] ?? '')
+                      .toString();
+              if (id.isNotEmpty) {
+                _completeHabitFromHome(habit, _holdingIndex!);
+              }
+            }
+            _resetHold();
+          }
+        });
+
+    _auraChipTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (!mounted) return;
+      setState(() => _showAuraAsText = true);
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted) setState(() => _showAuraAsText = false);
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _bounceController.dispose();
+    _holdController?.dispose();
+    _auraChipTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _initializePageData() async {
-    await _initApp();
-    if (mounted) {}
+    if (mounted) _initApp();
   }
 
   Future<void> _initApp() async {
-    setState(() => isLoading = true);
     await _loadUserName();
     await _fetchDataFromServer();
-    await _loadStudyPlanData();
-    if (mounted) setState(() => isLoading = false);
   }
 
   Future<void> _loadUserName() async {
@@ -142,104 +253,106 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _loadStudyPlanData() async {
+  Future<void> _fetchDataFromServer() async {
+    if (!mounted || _refreshInFlight) return;
+    _refreshInFlight = true;
+    setState(() => isLoading = true);
     try {
-      final plan = await _apiService.getStudyPlan();
-      if (mounted) {
-        if (plan != null) {
-          final subjectsJson = plan['subjects'] as List? ?? [];
-          final subjects = subjectsJson
+      final dashboard = await _apiService.getTasksAndHabits();
+      final fetchedTasks = (dashboard['tasks'] as List?) ?? const [];
+      final fetchedHabits = (dashboard['habits'] as List?) ?? const [];
+
+      final fetchedProfile = await _apiService.getUserProfile();
+
+      Map<String, dynamic>? planMap;
+      try {
+        planMap = await _apiService.getStudyPlan();
+      } catch (_) {
+        planMap = null;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _studyPlanMap = planMap;
+
+        final allTasks = fetchedTasks
+            .map((t) => Task.fromJson(t as Map<String, dynamic>))
+            .toList();
+        completedTasks = allTasks
+            .where((t) => t.status == 'completed')
+            .toList();
+        tasks = allTasks.where((t) => t.status == 'pending').toList();
+
+        _preloadedHabits = fetchedHabits;
+
+        _userProfile = fetchedProfile;
+        aura = fetchedProfile['aura'] ?? 50;
+        if (auraHistory.isEmpty || auraHistory.last != aura) {
+          auraHistory.add(aura);
+          if (auraHistory.length > 8) {
+            auraHistory = auraHistory.sublist(auraHistory.length - 8);
+          }
+        }
+        auraDates = completedTasks
+            .map(
+              (t) => t.completedAt != null
+                  ? DateTime.tryParse(t.completedAt!)
+                  : null,
+            )
+            .where((d) => d != null)
+            .toList();
+
+        if (planMap != null) {
+          List asList(dynamic v) {
+            if (v is List) return v;
+            if (v is Map) {
+              final c = v['data'] ?? v['items'] ?? v['documents'] ?? v['list'];
+              return c is List ? c : const [];
+            }
+            return const [];
+          }
+
+          final subjectsJson = asList(planMap['subjects']);
+          _subjects = subjectsJson
               .map((s) => Subject.fromJson(s as Map<String, dynamic>))
               .toList();
 
-          final timetableJson = plan['timetable'] as List? ?? [];
-          final today = DateUtils.dateOnly(DateTime.now());
-          final todayString = DateFormat('yyyy-MM-dd').format(today);
+          List todayTasks = const [];
+          final timetableJson = asList(planMap['timetable']);
+          if (timetableJson.isNotEmpty) {
+            final today = DateUtils.dateOnly(DateTime.now());
+            final todayString = DateFormat('yyyy-MM-dd').format(today);
+            final day = timetableJson.cast<Map>().firstWhere(
+              (d) => d['date'] == todayString,
+              orElse: () => const {'tasks': []},
+            );
+            todayTasks = (day['tasks'] as List?) ?? const [];
+          }
 
-          final todaySchedule = timetableJson.firstWhere(
-            (d) => d['date'] == todayString,
-            orElse: () => {'tasks': []},
-          );
-
-          setState(() {
-            _isStudyPlanSetupComplete = true;
-            _subjects = subjects;
-            _todaysStudyPlan = (todaySchedule['tasks'] as List? ?? [])
-                .map((t) => Map<String, dynamic>.from(t))
-                .toList();
-          });
+          _todaysStudyPlan = todayTasks
+              .map((t) => Map<String, dynamic>.from(t as Map))
+              .toList();
+          _isStudyPlanSetupComplete =
+              _subjects.isNotEmpty || _todaysStudyPlan.isNotEmpty;
         } else {
-          setState(() {
-            _isStudyPlanSetupComplete = false;
-            _todaysStudyPlan = [];
-          });
-        }
-      }
-    } catch (e) {
-      print("Error loading study plan from API: $e");
-      if (mounted) {
-        setState(() {
           _isStudyPlanSetupComplete = false;
           _todaysStudyPlan = [];
-        });
-      }
-    }
-  }
-
-  Future<void> _fetchDataFromServer() async {
-    if (!mounted) return;
-    setState(() => isLoading = true);
-    try {
-      final fetchedTasks = await _apiService.getTasks();
-      final fetchedProfile = await _apiService.getUserProfile();
-      print("Debug: _fetchDataFromServer: fetchedProfile = $fetchedProfile");
-
-      if (mounted) {
-        setState(() {
-          tasks = fetchedTasks
-              .map((taskJson) => Task.fromJson(taskJson))
-              .where((task) => task.status == 'pending')
-              .toList();
-          completedTasks = fetchedTasks
-              .map((taskJson) => Task.fromJson(taskJson))
-              .where((task) => task.status == 'completed')
-              .toList();
-
-          _userProfile = fetchedProfile;
-          aura = fetchedProfile['aura'] ?? 50;
-
-          if (auraHistory.isEmpty || auraHistory.last != aura) {
-            auraHistory.add(aura);
-            if (auraHistory.length > 8) {
-              auraHistory = auraHistory.sublist(auraHistory.length - 8);
-            }
-          }
-          auraDates = completedTasks
-              .map(
-                (t) => t.completedAt != null
-                    ? DateTime.tryParse(t.completedAt!)
-                    : null,
-              )
-              .where((d) => d != null)
-              .toList();
-        });
-      }
+        }
+      });
     } catch (e, s) {
-      print("Debug: _fetchDataFromServer: Exception caught: $e");
-      print("Debug: _fetchDataFromServer: Stacktrace: $s");
+      print("Debug: _fetchDataFromServer error: $e\n$s");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error fetching data: ${e.toString()}'),
+            content: Text('Error fetching data: $e'),
             behavior: SnackBarBehavior.floating,
           ),
         );
         _userProfile = null;
       }
     } finally {
-      if (mounted) {
-        setState(() => isLoading = false);
-      }
+      if (mounted) setState(() => isLoading = false);
+      _refreshInFlight = false;
     }
   }
 
@@ -795,18 +908,18 @@ class _HomePageState extends State<HomePage> {
 
   void _updateTimetableSetupState(bool isComplete) {
     if (mounted) {
-      setState(() {
-        _isTimetableSetupInProgress = !isComplete;
-      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _isTimetableSetupInProgress = !isComplete;
+            _isStudyPlanSetupComplete = isComplete;
+          });
 
-      if (isComplete) {
-        _loadStudyPlanData();
-      } else {
-        setState(() {
-          _isStudyPlanSetupComplete = false;
-          _todaysStudyPlan = [];
-        });
-      }
+          if (isComplete) {
+            _fetchDataFromServer();
+          }
+        }
+      });
     }
   }
 
@@ -814,20 +927,16 @@ class _HomePageState extends State<HomePage> {
     final prefs = await SharedPreferences.getInstance();
     final showQuote = prefs.getBool(_prefShowQuote);
     final tabs = prefs.getStringList(_prefEnabledTabs);
-    if (mounted) {
-      setState(() {
-        if (showQuote != null) _showQuote = showQuote;
-        _enabledTabs = (tabs?.toSet() ?? {'habits', 'blocker', 'planner'})
-            .where((t) => {'habits', 'blocker', 'planner'}.contains(t))
-            .toSet();
-        if (_enabledTabs.isEmpty) {
-          _enabledTabs = {'habits'};
-        }
-        if (_selectedIndex >= _currentPagesAndKeys().$1.length) {
-          _selectedIndex = 0;
-        }
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      if (showQuote != null) _showQuote = showQuote;
+      _enabledTabs = (tabs?.toSet() ?? {'habits', 'blocker', 'planner'})
+          .where((t) => {'habits', 'blocker', 'planner'}.contains(t))
+          .toSet();
+      if (_enabledTabs.isEmpty) _enabledTabs = {'habits'};
+      final keys = _currentTabKeys();
+      if (_selectedIndex >= keys.length) _selectedIndex = 0;
+    });
   }
 
   Future<void> _updateShowQuote(bool value) async {
@@ -840,13 +949,20 @@ class _HomePageState extends State<HomePage> {
     final next = tabs.isEmpty ? {'habits'} : tabs;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_prefEnabledTabs, next.toList());
-    if (mounted) {
-      setState(() {
-        _enabledTabs = next;
-        final pages = _currentPagesAndKeys().$1;
-        if (_selectedIndex >= pages.length) _selectedIndex = 0;
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      _enabledTabs = next;
+      final keys = _currentTabKeys();
+      if (_selectedIndex >= keys.length) _selectedIndex = 0;
+    });
+  }
+
+  List<String> _currentTabKeys() {
+    final keys = <String>['home'];
+    if (_enabledTabs.contains('habits')) keys.add('habits');
+    if (_enabledTabs.contains('blocker')) keys.add('blocker');
+    if (_enabledTabs.contains('planner')) keys.add('planner');
+    return keys;
   }
 
   (List<Widget>, List<String>) _currentPagesAndKeys() {
@@ -857,7 +973,9 @@ class _HomePageState extends State<HomePage> {
     keys.add('home');
 
     if (_enabledTabs.contains('habits')) {
-      pages.add(HabitsPage(apiService: _apiService));
+      pages.add(
+        HabitsPage(apiService: _apiService, initialHabits: _preloadedHabits),
+      );
       keys.add('habits');
     }
     if (_enabledTabs.contains('blocker')) {
@@ -875,6 +993,7 @@ class _HomePageState extends State<HomePage> {
           onSetupStateChanged: _updateTimetableSetupState,
           apiService: _apiService,
           onTaskCompleted: _fetchDataFromServer,
+          initialStudyPlan: _studyPlanMap,
         ),
       );
       keys.add('planner');
@@ -883,23 +1002,89 @@ class _HomePageState extends State<HomePage> {
     return (pages, keys);
   }
 
+  Widget _buildSelectedTab(String key) {
+    switch (key) {
+      case 'habits':
+        return HabitsPage(
+          apiService: _apiService,
+          initialHabits: _preloadedHabits,
+        );
+      case 'blocker':
+        return SocialMediaBlockerScreen(
+          apiService: _apiService,
+          onChallengeCompleted: _fetchDataFromServer,
+        );
+      case 'planner':
+        return StudyPlannerScreen(
+          onSetupStateChanged: _updateTimetableSetupState,
+          apiService: _apiService,
+          onTaskCompleted: _fetchDataFromServer,
+          initialStudyPlan: _studyPlanMap,
+        );
+      case 'home':
+      default:
+        return _buildDashboardView();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final (pages, keys) = _currentPagesAndKeys();
-    final plannerSelected =
-        keys.isNotEmpty && keys[_selectedIndex] == 'planner';
+    final keys = _currentTabKeys();
+    final selectedKey = keys[_selectedIndex];
+    final plannerSelected = selectedKey == 'planner';
     final showHeader = !(plannerSelected && _isTimetableSetupInProgress);
 
     return Scaffold(
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Theme.of(context).colorScheme.surface,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 16.0),
+          child: Chip(
+            shape: const StadiumBorder(),
+            avatar: Icon(
+              Icons.auto_awesome_rounded,
+              color: Theme.of(context).colorScheme.primary,
+              size: 20,
+            ),
+            label: SizedBox(
+              width: 48,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 400),
+                transitionBuilder: (Widget child, Animation<double> animation) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0.0, 0.5),
+                        end: Offset.zero,
+                      ).animate(animation),
+                      child: child,
+                    ),
+                  );
+                },
+                child: Text(
+                  _showAuraAsText ? 'Aura' : '$aura',
+                  key: ValueKey<bool>(_showAuraAsText),
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.gabarito(
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+              ),
+            ),
+            backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+            side: BorderSide.none,
+          ),
+        ),
+        leadingWidth: 120,
         title: Text(
           'AurAchieve',
           style: GoogleFonts.ebGaramond(
             fontSize: 24,
             fontWeight: FontWeight.bold,
-            color: Theme.of(context).colorScheme.primary,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
             letterSpacing: 1.2,
           ),
         ),
@@ -908,7 +1093,7 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             icon: Icon(
               Icons.bar_chart_rounded,
-              color: Theme.of(context).colorScheme.primary,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
             tooltip: 'Stats',
             onLongPress: () async {
@@ -939,7 +1124,7 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             icon: Icon(
               Icons.settings_outlined,
-              color: Theme.of(context).colorScheme.primary,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
             tooltip: 'Settings',
             onPressed: () async {
@@ -972,64 +1157,66 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                if (showHeader)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: RichText(
-                        text: TextSpan(
-                          style: GoogleFonts.ebGaramond(
-                            fontSize: 32,
-                            fontWeight: FontWeight.bold,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                          children: [
-                            const TextSpan(text: 'Hi, '),
-                            TextSpan(
-                              text: userName,
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                            ),
-                            const TextSpan(text: '!'),
-                          ],
+      body: Column(
+        children: [
+          if (showHeader)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: RichText(
+                  text: TextSpan(
+                    style: GoogleFonts.ebGaramond(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                    children: [
+                      const TextSpan(text: 'Hi, '),
+                      TextSpan(
+                        text: userName,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
                         ),
                       ),
-                    ),
+                      const TextSpan(text: '!'),
+                    ],
                   ),
-                if (showHeader)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.auto_awesome_rounded,
-                          color: Theme.of(context).colorScheme.primary,
-                          size: 26,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Your Aura: $aura',
-                          style: GoogleFonts.gabarito(
-                            fontSize: 18,
-                            color: Theme.of(context).colorScheme.onSurface,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (showHeader) const SizedBox(height: 16),
-                Expanded(
-                  child: IndexedStack(index: _selectedIndex, children: pages),
                 ),
-              ],
+              ),
             ),
+          if (showHeader)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Theme.of(context).colorScheme.primary,
+                    size: 26,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Your Aura: $aura',
+                    style: GoogleFonts.gabarito(
+                      fontSize: 18,
+                      color: Theme.of(context).colorScheme.onSurface,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (showHeader) const SizedBox(height: 16),
+          Expanded(
+            child: selectedKey == 'home'
+                ? (isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _buildDashboardView())
+                : _buildSelectedTab(selectedKey),
+          ),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         onDestinationSelected: (int index) {
           setState(() {
@@ -1069,13 +1256,338 @@ class _HomePageState extends State<HomePage> {
               onPressed: _addTask,
               icon: const Icon(Icons.add_rounded),
               label: const Text('Add Task'),
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              foregroundColor: Theme.of(context).colorScheme.onPrimary,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
             )
           : null,
+    );
+  }
+
+  List<String> _normalizeCompletedDays(dynamic raw) {
+    if (raw is List) return raw.map((e) => e.toString()).toList();
+    if (raw is String) {
+      final s = raw.trim();
+      if (s.isEmpty) return <String>[];
+      try {
+        final decoded = jsonDecode(s);
+        if (decoded is List) return decoded.map((e) => e.toString()).toList();
+      } catch (_) {}
+      return s
+          .split(',')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+    return <String>[];
+  }
+
+  String _todayLocalKey() {
+    final now = DateTime.now();
+    return '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  }
+
+  void _startHold(int index) {
+    setState(() => _holdingIndex = index);
+    _holdController?.forward(from: 0);
+  }
+
+  void _resetHold() {
+    final c = _holdController;
+    if (c != null) {
+      c.stop();
+      c.reset();
+    }
+    if (mounted) setState(() => _holdingIndex = null);
+  }
+
+  Future<void> _completionHaptics() async {
+    try {
+      HapticFeedback.lightImpact();
+      await Future.delayed(const Duration(milliseconds: 40));
+      HapticFeedback.mediumImpact();
+    } catch (_) {}
+  }
+
+  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  int _computeStreak(Set<DateTime> completedSet) {
+    if (completedSet.isEmpty) return 0;
+    final today = _dateOnly(DateTime.now());
+    final yesterday = today.subtract(const Duration(days: 1));
+
+    if (!completedSet.contains(today) && !completedSet.contains(yesterday)) {
+      return 0;
+    }
+    int streak = 0;
+    var cursor = completedSet.contains(today) ? today : yesterday;
+    while (completedSet.contains(cursor)) {
+      streak++;
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+    return streak;
+  }
+
+  Future<void> _completeHabitFromHome(
+    Map<String, dynamic> habit,
+    int index,
+  ) async {
+    final id = (habit[r'$id'] ?? habit['id'] ?? habit['habitId'] ?? '')
+        .toString();
+    if (id.isEmpty) return;
+
+    final prevCount = habit['completedTimes'] as int? ?? 0;
+    final prevDays = _normalizeCompletedDays(habit['completedDays']);
+    final today = _todayLocalKey();
+    final updatedDays = List<String>.from(prevDays);
+    if (!updatedDays.contains(today)) updatedDays.add(today);
+
+    setState(() {
+      habit['completedTimes'] = prevCount + 1;
+      habit['completedDays'] = updatedDays;
+      _completedIndex = index;
+    });
+
+    unawaited(_completionHaptics());
+    _secondTickDone = false;
+    _bounceController.forward(from: 0);
+
+    try {
+      await _apiService.incrementHabitCompletedTimes(
+        id,
+        completedDays: updatedDays,
+      );
+    } catch (e) {
+      setState(() {
+        habit['completedTimes'] = prevCount;
+        habit['completedDays'] = prevDays;
+        _completedIndex = null;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update habit: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showHabitDetails(Map<String, dynamic> habit) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        final name = (habit['habitName'] ?? habit['habit'] ?? '').toString();
+        final goal = (habit['habitGoal'] ?? habit['goal'] ?? '').toString();
+        final totalCompletions = habit['completedTimes'] as int? ?? 0;
+        final completedDays = _normalizeCompletedDays(habit['completedDays']);
+        return AlertDialog(
+          title: Text(
+            name,
+            style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (goal.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Text('Goal: $goal', style: GoogleFonts.gabarito()),
+                ),
+              Text(
+                'Total Completions: $totalCompletions',
+                style: GoogleFonts.gabarito(),
+              ),
+              Text(
+                'Completed Days: ${completedDays.length}',
+                style: GoogleFonts.gabarito(),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildHabitCardForHome(
+    Map<String, dynamic> h,
+    int index,
+    ColorScheme scheme,
+  ) {
+    final id = (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '').toString();
+    final name = (h['habitName'] ?? h['habit'] ?? '').toString();
+    final goal = (h['habitGoal'] ?? h['goal'] ?? '').toString();
+    final totalCompletions = h['completedTimes'] as int? ?? 0;
+
+    final completedDaysRaw = _normalizeCompletedDays(h['completedDays']);
+
+    final completedDates = completedDaysRaw
+        .map((s) {
+          try {
+            return DateTime.parse(s);
+          } catch (_) {
+            return null;
+          }
+        })
+        .whereType<DateTime>()
+        .map(_dateOnly)
+        .toSet();
+    final streak = _computeStreak(completedDates);
+
+    final colorPair = (bg: scheme.surfaceContainer, fg: scheme.onSurface);
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16.0),
+    );
+    final BorderRadius radius = shape.borderRadius as BorderRadius;
+
+    return AnimatedBuilder(
+      animation: _bounceController,
+      builder: (context, child) {
+        double scale = 1.0;
+        if (_completedIndex == index) {
+          scale = 1.0 + _bounceScale.value;
+        }
+        return Transform.scale(scale: scale, child: child);
+      },
+      child: Card(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        clipBehavior: Clip.antiAlias,
+        color: colorPair.bg,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: radius,
+          side: BorderSide(color: scheme.outlineVariant.withOpacity(0.5)),
+        ),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _showHabitDetails(h),
+          onLongPressStart: (_) {
+            if (id.isEmpty) return;
+            if (index < 0 || index >= _preloadedHabits.length) return;
+            _startHold(index);
+          },
+          onLongPressEnd: (_) => _resetHold(),
+          onLongPressCancel: _resetHold,
+          child: Stack(
+            children: [
+              if (_holdController != null)
+                Positioned.fill(
+                  child: AnimatedBuilder(
+                    animation: _holdController!,
+                    builder: (context, _) {
+                      final isActive = _holdingIndex == index;
+                      final v = isActive ? _holdController!.value : 0.0;
+                      return Align(
+                        alignment: Alignment.bottomCenter,
+                        child: FractionallySizedBox(
+                          widthFactor: 1.0,
+                          heightFactor: v.clamp(0.0, 1.0),
+                          child: ClipRRect(
+                            borderRadius: radius,
+                            child: Container(
+                              color: scheme.primary.withOpacity(0.22),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 16,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'I will',
+                            style: GoogleFonts.gabarito(
+                              fontSize: 13,
+                              color: colorPair.fg.withOpacity(0.8),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            name,
+                            style: GoogleFonts.gabarito(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w700,
+                              color: colorPair.fg,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          if (goal.isNotEmpty) const SizedBox(height: 6),
+                          if (goal.isNotEmpty)
+                            RichText(
+                              text: TextSpan(
+                                style: GoogleFonts.gabarito(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                children: [
+                                  TextSpan(
+                                    text: 'to become ',
+                                    style: TextStyle(
+                                      color: colorPair.fg.withOpacity(0.8),
+                                    ),
+                                  ),
+                                  TextSpan(
+                                    text: goal,
+                                    style: TextStyle(
+                                      color: colorPair.fg,
+                                      decoration: TextDecoration.underline,
+                                      decorationColor: scheme.primary
+                                          .withOpacity(0.8),
+                                      decorationStyle: TextDecorationStyle.wavy,
+                                      decorationThickness: 1.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Row(
+                      children: [
+                        _StatBadge(
+                          value: streak,
+                          icon: Icons.local_fire_department_outlined,
+                          color: scheme.primary,
+                          textColor: colorPair.fg,
+                        ),
+                        const SizedBox(width: 12),
+                        _StatBadge(
+                          value: totalCompletions,
+                          icon: Icons.done_all_outlined,
+                          color: scheme.tertiary,
+                          textColor: colorPair.fg,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1086,6 +1598,8 @@ class _HomePageState extends State<HomePage> {
       builder: (context, constraints) {
         final double screenWidth = constraints.maxWidth;
         final int crossAxisCount = screenWidth > 600 ? 4 : 2;
+        final hasHabits = _preloadedHabits.isNotEmpty;
+        final scheme = Theme.of(context).colorScheme;
 
         return ListView(
           padding: const EdgeInsets.symmetric(
@@ -1220,35 +1734,110 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
             ],
-
-            if (_isStudyPlanSetupComplete && _todaysStudyPlan.isNotEmpty) ...[
+            if (hasHabits) ...[
               const SizedBox(height: 24.0),
-              Text(
-                "Study Plan",
-                style: GoogleFonts.gabarito(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "Habits",
+                    style: GoogleFonts.gabarito(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+
+                  IconButton(
+                    icon: const Icon(Icons.arrow_forward_rounded),
+                    onPressed: () {
+                      final keys = _currentTabKeys();
+                      final idx = keys.indexOf('habits');
+                      if (idx != -1) {
+                        setState(() => _selectedIndex = idx);
+                      } else {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => HabitsPage(
+                              apiService: _apiService,
+                              initialHabits: _preloadedHabits,
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+              ..._preloadedHabits.take(2).map((h) {
+                final m = (h is Map<String, dynamic>)
+                    ? h
+                    : Map<String, dynamic>.from(h as Map);
+                m['completedTimes'] = m['completedTimes'] ?? 0;
+                m['completedDays'] = _normalizeCompletedDays(
+                  m['completedDays'],
+                );
+                final index = _preloadedHabits.indexOf(h);
+                return _buildHabitCardForHome(m, index, scheme);
+              }),
+            ],
+            if (_isStudyPlanSetupComplete) ...[
+              const SizedBox(height: 24.0),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "Study Plan",
+                    style: GoogleFonts.gabarito(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+
+                  IconButton(
+                    icon: const Icon(Icons.arrow_forward_rounded),
+                    onPressed: () {
+                      final keys = _currentTabKeys();
+                      final idx = keys.indexOf('planner');
+                      if (idx != -1) setState(() => _selectedIndex = idx);
+                    },
+                  ),
+                ],
               ),
               const SizedBox(height: 8),
-
-              ..._todaysStudyPlan
-                  .take(3)
-                  .map((task) => _buildStudyPlanTile(task)),
-
-              if (_todaysStudyPlan.length > 3)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () {
-                      setState(() {
-                        _selectedIndex = 2;
-                      });
-                    },
-                    child: const Text('Show More...'),
+              if (_todaysStudyPlan.isEmpty)
+                Card(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.outlineVariant.withOpacity(0.4),
+                    ),
                   ),
-                ),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.tertiaryContainer,
+                      child: Icon(
+                        Icons.self_improvement_outlined,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onTertiaryContainer,
+                      ),
+                    ),
+                    title: const Text("Break Day"),
+                    subtitle: const Text("Relax and recharge!"),
+                  ),
+                )
+              else
+                ..._todaysStudyPlan
+                    .take(3)
+                    .map((task) => _buildStudyPlanTile(task)),
             ],
           ],
         );
@@ -1341,56 +1930,165 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  String _todayDateStringLocal() {
+    final today = DateUtils.dateOnly(DateTime.now());
+    return DateFormat('yyyy-MM-dd').format(today);
+  }
+
+  Future<void> _completeStudyPlanFromHome(Map<String, dynamic> item) async {
+    if ((item['completed'] as bool?) == true) return;
+
+    bool dialogShown = false;
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
+      dialogShown = true;
+    }
+
+    try {
+      final result = await _apiService.completeStudyPlanTask(
+        item['id'],
+        _todayDateStringLocal(),
+      );
+
+      await _fetchDataFromServer();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('You gained ${result['auraChange'] ?? 30} Aura!'),
+            backgroundColor: Theme.of(context).colorScheme.primary,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update task: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } finally {
+      if (dialogShown && mounted) Navigator.pop(context);
+    }
+  }
+
   Widget _buildStudyPlanTile(Map<String, dynamic> item) {
     IconData icon;
-    String titleText;
-    String? subtitleText;
+    Widget title;
+    Widget? subtitle;
+    Widget? trailing;
     Color avatarColor;
 
     switch (item['type']) {
       case 'study':
-        final content = item['content'] as Map<String, dynamic>;
-        final subject = _subjects.firstWhere(
-          (s) => s.name == content['subject'],
-          orElse: () =>
-              Subject(name: 'Unknown', icon: Icons.help, color: Colors.grey),
-        );
-        icon = subject.icon;
-        avatarColor = subject.color;
-        titleText = "Study: Ch. ${content['chapterNumber']}";
-        subtitleText = subject.name;
-        break;
+        {
+          final content = item['content'] as Map<String, dynamic>;
+          final subjectName = content['subject'] as String? ?? 'Unknown';
+          final subject = _subjects.firstWhere(
+            (s) => s.name == subjectName,
+            orElse: () => Subject(
+              name: 'Unknown',
+              icon: Icons.help,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+          );
+          final chapterNumber = content['chapterNumber'] as String?;
+          final chapterName = content['chapterName'] as String? ?? '';
+
+          icon = subject.icon;
+          avatarColor = subject.color;
+          title = Text(
+            chapterName.isNotEmpty ? chapterName : "Chapter $chapterNumber",
+            style: const TextStyle(fontWeight: FontWeight.w500),
+          );
+          subtitle = Text(subject.name);
+          if (chapterName.isNotEmpty) {
+            trailing = Text(
+              "Ch. $chapterNumber",
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            );
+          }
+          break;
+        }
       case 'revision':
-        final content = item['content'] as Map<String, dynamic>;
-        final subject = _subjects.firstWhere(
-          (s) => s.name == content['subject'],
-          orElse: () =>
-              Subject(name: 'Unknown', icon: Icons.help, color: Colors.grey),
-        );
-        icon = Icons.history_outlined;
-        avatarColor = subject.color.withOpacity(0.7);
-        titleText = "Revise: Ch. ${content['chapterNumber']}";
-        subtitleText = subject.name;
-        break;
+        {
+          final content = item['content'] as Map<String, dynamic>;
+          final subjectName = content['subject'] as String? ?? 'Unknown';
+          final subject = _subjects.firstWhere(
+            (s) => s.name == subjectName,
+            orElse: () => Subject(
+              name: 'Unknown',
+              icon: Icons.help,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+          );
+          final chapterNumber = content['chapterNumber'] as String?;
+          final chapterName = content['chapterName'] as String? ?? '';
+
+          icon = Icons.history_outlined;
+          avatarColor = subject.color.withOpacity(0.7);
+          title = Text(
+            chapterName.isNotEmpty
+                ? "Revise: $chapterName"
+                : "Revise: Chapter $chapterNumber",
+          );
+          subtitle = Text(subject.name);
+          break;
+        }
       default:
         icon = Icons.self_improvement_outlined;
         avatarColor = Theme.of(context).colorScheme.tertiaryContainer;
-        titleText = "Break Day";
-        subtitleText = "Relax and recharge!";
+        title = const Text("Break Day");
+        subtitle = const Text("Relax and recharge!");
     }
+
+    final iconColor =
+        ThemeData.estimateBrightnessForColor(avatarColor) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
+    final isBreak = item['type'] == 'break';
+    final isCompleted = (item['completed'] as bool?) ?? false;
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.4),
+        ),
+      ),
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: avatarColor,
-          child: Icon(
-            icon,
-            color: Theme.of(context).colorScheme.onPrimaryContainer,
-          ),
+          child: Icon(icon, color: iconColor),
         ),
-        title: Text(titleText),
-        subtitle: Text(subtitleText),
+        title: title,
+        subtitle: subtitle,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (trailing != null) trailing,
+            if (!isBreak)
+              Checkbox(
+                value: isCompleted,
+                onChanged: isCompleted
+                    ? null
+                    : (v) {
+                        if (v == true) _completeStudyPlanFromHome(item);
+                      },
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1696,4 +2394,46 @@ class _HomePageState extends State<HomePage> {
 
   String _capitalize(String s) =>
       s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+}
+
+class _StatBadge extends StatelessWidget {
+  final int value;
+  final IconData icon;
+  final Color color;
+  final Color textColor;
+
+  const _StatBadge({
+    required this.value,
+    required this.icon,
+    required this.color,
+    required this.textColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final iconColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          child: Icon(icon, size: 22, color: iconColor),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '$value',
+          style: GoogleFonts.gabarito(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: textColor.withOpacity(0.9),
+          ),
+        ),
+      ],
+    );
+  }
 }

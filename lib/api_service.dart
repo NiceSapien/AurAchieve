@@ -11,26 +11,66 @@ dynamic _parseJson(String jsonString) {
 
 class ApiService {
   final String _baseUrl =
-      'https://auraascend-fgf4aqf5gubgacb3.centralindia-01.azurewebsites.net';
+      'https://ubiquitous-waddle-557rj9965pwh7q7g-3000.app.github.dev';
   final Account account;
   final _storage = const FlutterSecureStorage();
 
   ApiService({required this.account});
-  // temporarily publiced getJwtToken. Rename it to _getJwtToken later
+
   Future<String?> getJwtToken() async {
     return await _storage.read(key: 'jwt_token');
   }
 
   Future<Map<String, String>> _getHeaders() async {
     final token = await getJwtToken();
-    if (token == null) {
-      print('JWT token not found for API request.');
-      throw Exception('Authentication token not found.');
-    }
     return {
-      'Content-Type': 'application/json; charset=UTF-8',
-      'Authorization': 'Bearer $token',
+      'Authorization': token != null ? 'Bearer $token' : '',
+      'Content-Type': 'application/json',
     };
+  }
+
+  List<dynamic> _asList(dynamic v) {
+    if (v is List) return v;
+    if (v is Map) {
+      final inner = v['data'] ?? v['items'] ?? v['documents'] ?? v['list'];
+      if (inner is List) return inner;
+      if (inner is String) {
+        try {
+          final decoded = jsonDecode(inner);
+          if (decoded is List) return decoded;
+        } catch (_) {}
+      }
+    }
+    if (v is String) {
+      try {
+        final decoded = jsonDecode(v);
+        if (decoded is List) return decoded;
+        if (decoded is Map) {
+          final inner =
+              decoded['data'] ??
+              decoded['items'] ??
+              decoded['documents'] ??
+              decoded['list'];
+          if (inner is List) return inner;
+        }
+      } catch (_) {}
+    }
+    return const [];
+  }
+
+  Map<String, dynamic>? _asMap(dynamic v) {
+    if (v is Map) {
+      final inner = v['data'];
+      if (inner is Map) return Map<String, dynamic>.from(inner);
+      return Map<String, dynamic>.from(v);
+    }
+    if (v is String && v.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(v);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    return null;
   }
 
   Future<Map<String, dynamic>> getUserProfile() async {
@@ -463,7 +503,7 @@ class ApiService {
             return List<String>.from(parsed.map((e) => e.toString()));
           }
         } catch (_) {}
-        // fallback: maybe comma list
+
         return raw
             .split(',')
             .map((e) => e.trim())
@@ -514,5 +554,34 @@ class ApiService {
     if (res.statusCode != 200 && res.statusCode != 204) {
       throw Exception('Failed to delete habit: ${res.body}');
     }
+  }
+
+  Future<Map<String, dynamic>> getTasksAndHabits() async {
+    final headers = await _getHeaders();
+    final resp = await http.get(
+      Uri.parse('$_baseUrl/api/tasks'),
+      headers: headers,
+    );
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw Exception(
+        'Failed to fetch dashboard: ${resp.statusCode} ${resp.body}',
+      );
+    }
+
+    final root = await compute(_parseJson, resp.body);
+
+    List tasks = [];
+    List habits = [];
+    Map<String, dynamic>? studyPlan;
+
+    if (root is Map) {
+      tasks = _asList(root['tasks']);
+      habits = _asList(root['habits']);
+      studyPlan = _asMap(root['studyPlan']);
+    } else if (root is List) {
+      tasks = root;
+    }
+
+    return {'tasks': tasks, 'habits': habits, 'studyPlan': studyPlan};
   }
 }

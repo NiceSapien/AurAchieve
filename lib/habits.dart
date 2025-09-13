@@ -5,10 +5,12 @@ import 'screens/habit_setup.dart';
 import 'dart:async';
 import 'widgets/dynamic_color_svg.dart' as dynamic_color_svg;
 import 'dart:convert';
+import 'package:flutter/services.dart';
 
 class HabitsPage extends StatefulWidget {
   final ApiService apiService;
-  const HabitsPage({super.key, required this.apiService});
+  final List<dynamic>? initialHabits;
+  const HabitsPage({super.key, required this.apiService, this.initialHabits});
   @override
   State<HabitsPage> createState() => _HabitsPageState();
 }
@@ -22,19 +24,35 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   int? _completedIndex;
   AnimationController? _holdController;
   int? _holdingIndex;
+  bool _secondTickDone = false;
+  static const int _secondTickLeadMs = 180;
 
   @override
   void initState() {
     super.initState();
     _bounceController =
         AnimationController(
-          vsync: this,
-          duration: const Duration(milliseconds: 850),
-        )..addStatusListener((s) {
-          if (s == AnimationStatus.completed && mounted) {
-            setState(() => _completedIndex = null);
-          }
-        });
+            vsync: this,
+            duration: const Duration(milliseconds: 850),
+          )
+          ..addStatusListener((s) async {
+            if (s == AnimationStatus.completed && mounted) {
+              setState(() => _completedIndex = null);
+            }
+          })
+          ..addListener(() {
+            if (_secondTickDone) return;
+            final total = _bounceController.duration?.inMilliseconds ?? 0;
+            final elapsed =
+                _bounceController.lastElapsedDuration?.inMilliseconds ?? 0;
+            if (total > 0 && elapsed >= (total - _secondTickLeadMs)) {
+              try {
+                HapticFeedback.selectionClick();
+              } catch (_) {}
+              _secondTickDone = true;
+            }
+          });
+
     _bounceScale = _bounceController.drive(
       TweenSequence<double>([
         TweenSequenceItem(
@@ -99,7 +117,61 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
             _resetHold();
           }
         });
-    _loadHabits();
+
+    final preload = widget.initialHabits;
+    if (preload != null && preload.isNotEmpty) {
+      _habits = _normalizeHabits(preload);
+      _loading = false;
+      setState(() {});
+    } else {
+      _loadHabits();
+    }
+  }
+
+  List<Map<String, dynamic>> _normalizeHabits(List rawList) {
+    final normalized = <Map<String, dynamic>>[];
+    for (final h in rawList) {
+      if (h is! Map) continue;
+      final m = Map<String, dynamic>.from(h);
+      final id = m[r'$id'] ?? m['id'] ?? m['habitId'];
+      m['completedTimes'] = m['completedTimes'] ?? 0;
+
+      if (m['completedDays'] is List) {
+        m['completedDays'] = List<String>.from(
+          (m['completedDays'] as List).map((e) => e.toString()),
+        );
+      } else if (m['completedDays'] is String) {
+        final s = (m['completedDays'] as String).trim();
+        if (s.isEmpty) {
+          m['completedDays'] = <String>[];
+        } else {
+          try {
+            final parsed = jsonDecode(s);
+            if (parsed is List) {
+              m['completedDays'] = List<String>.from(
+                parsed.map((e) => e.toString()),
+              );
+            } else {
+              m['completedDays'] = s
+                  .split(',')
+                  .map((e) => e.trim())
+                  .where((e) => e.isNotEmpty)
+                  .toList();
+            }
+          } catch (_) {
+            m['completedDays'] = s
+                .split(',')
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty)
+                .toList();
+          }
+        }
+      } else {
+        m['completedDays'] = <String>[];
+      }
+      normalized.add(m);
+    }
+    return normalized;
   }
 
   @override
@@ -127,40 +199,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     setState(() => _loading = true);
     try {
       final list = await widget.apiService.getHabits();
-      final normalized = <Map<String, dynamic>>[];
-
-      for (final h in list) {
-        if (h is! Map) continue;
-        final m = Map<String, dynamic>.from(h);
-        final id = m[r'$id'] ?? m['id'] ?? m['habitId'];
-        final localRem = id != null
-            ? await widget.apiService.getHabitReminderLocal(id.toString())
-            : null;
-        if (localRem != null && localRem.isNotEmpty) {
-          m['habitReminder'] = localRem;
-        }
-        m['completedTimes'] = m['completedTimes'] ?? 0;
-        if (m['completedDays'] is List) {
-          m['completedDays'] = List<String>.from(
-            (m['completedDays'] as List).map((e) => e.toString()),
-          );
-        } else if (m['completedDays'] is String) {
-          final s = (m['completedDays'] as String).trim();
-          if (s.isEmpty) {
-            m['completedDays'] = <String>[];
-          } else {
-            m['completedDays'] = s
-                .split(',')
-                .map((e) => e.trim())
-                .where((e) => e.isNotEmpty)
-                .toList();
-          }
-        } else {
-          m['completedDays'] = <String>[];
-        }
-        normalized.add(m);
-      }
-      if (mounted) setState(() => _habits = normalized);
+      if (mounted) setState(() => _habits = _normalizeHabits(list));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -180,6 +219,14 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     return (bg: s.surfaceContainer, fg: s.onSurface);
   }
 
+  Future<void> _completionHaptics() async {
+    try {
+      HapticFeedback.lightImpact();
+      await Future.delayed(const Duration(milliseconds: 40));
+      HapticFeedback.mediumImpact();
+    } catch (_) {}
+  }
+
   Future<void> _incrementCompleted(String habitId, int index) async {
     if (_updating) return;
     setState(() => _updating = true);
@@ -196,9 +243,6 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     final updatedDays = List<String>.from(prevDays);
     if (!updatedDays.contains(todayStr)) {
       updatedDays.add(todayStr);
-    } else {
-      setState(() => _updating = false);
-      return;
     }
 
     setState(() {
@@ -206,6 +250,10 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
       habit['completedDays'] = updatedDays;
       _completedIndex = index;
     });
+
+    unawaited(_completionHaptics());
+
+    _secondTickDone = false;
     _bounceController.forward(from: 0);
 
     try {
@@ -943,15 +991,6 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
             if (_updating || id.isEmpty) return;
 
             if (index < 0 || index >= _habits.length) return;
-
-            final todayKey = DateTime.now().toUtc();
-            final todayStr =
-                '${todayKey.year.toString().padLeft(4, '0')}-${todayKey.month.toString().padLeft(2, '0')}-${todayKey.day.toString().padLeft(2, '0')}';
-            final raw = h['completedDays'];
-            final List<String> days = raw is List
-                ? raw.map((e) => e.toString()).toList()
-                : <String>[];
-            if (days.contains(todayStr)) return;
 
             _startHold(index);
           },
