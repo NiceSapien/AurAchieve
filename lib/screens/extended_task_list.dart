@@ -207,19 +207,16 @@ class _AllTasksScreenState extends State<AllTasksScreen>
                     opacity: (expandedTaskId != null && !isExpanded)
                         ? 0.3
                         : 1.0,
-                    child: Hero(
-                      tag: 'task_hero_${task.id}',
-                      child: Material(
-                        type: MaterialType.transparency,
-                        child: _buildTaskCardItem(
-                          context,
-                          task,
-                          originalIndex,
-                          isExpanded,
-                          isCompleting,
-                          constraints,
-                          index,
-                        ),
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: _buildTaskCardItem(
+                        context,
+                        task,
+                        originalIndex,
+                        isExpanded,
+                        isCompleting,
+                        constraints,
+                        index,
                       ),
                     ),
                   );

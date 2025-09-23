@@ -138,6 +138,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _titleShowHello = true;
   Timer? _helloTitleTimer;
 
+  String? _taskLoadError;
+
   @override
   void initState() {
     super.initState();
@@ -255,7 +257,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Future<void> _initApp() async {
     await _loadUserName();
+    await _fetchUserProfile();
     await _fetchDataFromServer();
+  }
+
+  Future<void> _fetchUserProfile() async {
+    try {
+      final profile = await _apiService.getUserProfile();
+      if (!mounted) return;
+      setState(() {
+        _userProfile = profile;
+        final dynamic auraValue = profile['aura'];
+        if (auraValue is num) {
+          aura = auraValue.toInt();
+        } else if (auraValue is String) {
+          final parsed = int.tryParse(auraValue);
+          if (parsed != null) aura = parsed;
+        }
+      });
+    } catch (e) {
+      debugPrint('Failed to fetch profile: $e');
+    }
   }
 
   Future<void> _loadUserName() async {
@@ -272,100 +294,30 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _fetchDataFromServer() async {
     if (!mounted || _refreshInFlight) return;
     _refreshInFlight = true;
-    setState(() => isLoading = true);
+    setState(() {
+      isLoading = true;
+      _taskLoadError = null;
+    });
     try {
       final dashboard = await _apiService.getTasksAndHabits();
       final fetchedTasks = (dashboard['tasks'] as List?) ?? const [];
       final fetchedHabits = (dashboard['habits'] as List?) ?? const [];
 
-      final fetchedProfile = await _apiService.getUserProfile();
+      final allTasks = fetchedTasks
+          .map((t) => Task.fromJson(t as Map<String, dynamic>))
+          .toList();
 
-      Map<String, dynamic>? planMap;
-      try {
-        planMap = await _apiService.getStudyPlan();
-      } catch (_) {
-        planMap = null;
-      }
-
-      if (!mounted) return;
       setState(() {
-        _studyPlanMap = planMap;
-
-        final allTasks = fetchedTasks
-            .map((t) => Task.fromJson(t as Map<String, dynamic>))
-            .toList();
         completedTasks = allTasks
             .where((t) => t.status == 'completed')
             .toList();
         tasks = allTasks.where((t) => t.status == 'pending').toList();
-
         _preloadedHabits = fetchedHabits;
-
-        _userProfile = fetchedProfile;
-        aura = fetchedProfile['aura'] ?? 50;
-        if (auraHistory.isEmpty || auraHistory.last != aura) {
-          auraHistory.add(aura);
-          if (auraHistory.length > 8) {
-            auraHistory = auraHistory.sublist(auraHistory.length - 8);
-          }
-        }
-        auraDates = completedTasks
-            .map(
-              (t) => t.completedAt != null
-                  ? DateTime.tryParse(t.completedAt!)
-                  : null,
-            )
-            .where((d) => d != null)
-            .toList();
-
-        if (planMap != null) {
-          List asList(dynamic v) {
-            if (v is List) return v;
-            if (v is Map) {
-              final c = v['data'] ?? v['items'] ?? v['documents'] ?? v['list'];
-              return c is List ? c : const [];
-            }
-            return const [];
-          }
-
-          final subjectsJson = asList(planMap['subjects']);
-          _subjects = subjectsJson
-              .map((s) => Subject.fromJson(s as Map<String, dynamic>))
-              .toList();
-
-          List todayTasks = const [];
-          final timetableJson = asList(planMap['timetable']);
-          if (timetableJson.isNotEmpty) {
-            final today = DateUtils.dateOnly(DateTime.now());
-            final todayString = DateFormat('yyyy-MM-dd').format(today);
-            final day = timetableJson.cast<Map>().firstWhere(
-              (d) => d['date'] == todayString,
-              orElse: () => const {'tasks': []},
-            );
-            todayTasks = (day['tasks'] as List?) ?? const [];
-          }
-
-          _todaysStudyPlan = todayTasks
-              .map((t) => Map<String, dynamic>.from(t as Map))
-              .toList();
-          _isStudyPlanSetupComplete =
-              _subjects.isNotEmpty || _todaysStudyPlan.isNotEmpty;
-        } else {
-          _isStudyPlanSetupComplete = false;
-          _todaysStudyPlan = [];
-        }
       });
-    } catch (e, s) {
-      print("Debug: _fetchDataFromServer error: $e\n$s");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error fetching data: $e'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        _userProfile = null;
-      }
+    } catch (e) {
+      setState(() {
+        _taskLoadError = e.toString();
+      });
     } finally {
       if (mounted) setState(() => isLoading = false);
       _refreshInFlight = false;
@@ -1059,8 +1011,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     final keys = _currentTabKeys();
     final selectedKey = keys[_selectedIndex];
-    final plannerSelected = selectedKey == 'planner';
-    final showHeader = !(plannerSelected && _isTimetableSetupInProgress);
+    final showHeader =
+        !(selectedKey == 'planner' && _isTimetableSetupInProgress);
 
     final chipTextStyle = GoogleFonts.gabarito(
       fontWeight: FontWeight.w600,
@@ -1076,6 +1028,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final labelWidth = math.max(baseWidth, currentWidth);
 
     final leadingW = labelWidth + 72;
+
+    final tabScreens = [
+      _buildDashboardView(),
+      HabitsPage(apiService: _apiService, initialHabits: _preloadedHabits),
+      SocialMediaBlockerScreen(
+        apiService: _apiService,
+        onChallengeCompleted: _fetchDataFromServer,
+      ),
+      StudyPlannerScreen(
+        onSetupStateChanged: _updateTimetableSetupState,
+        apiService: _apiService,
+        onTaskCompleted: _fetchDataFromServer,
+        initialStudyPlan: _studyPlanMap,
+      ),
+    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -1146,17 +1113,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
             tooltip: 'Stats',
-            onLongPress: () async {
-              Clipboard.setData(
-                ClipboardData(text: await _apiService.getJwtToken() ?? ''),
-              );
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('JWT token copied lil bro'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
@@ -1211,28 +1167,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         children: [
           if (showHeader) const SizedBox(height: 8),
           Expanded(
-            child: selectedKey == 'home'
-                ? (isLoading
-                      ? const Center(child: CircularProgressIndicator())
-                      : _buildDashboardView())
-                : _buildSelectedTab(selectedKey),
+            child: IndexedStack(index: _selectedIndex, children: tabScreens),
           ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (i) {
-          final keys = _currentTabKeys();
-          if (i >= 0 && i < keys.length) {
-            setState(() => _selectedIndex = i);
-          }
+          HapticFeedback.selectionClick();
+          setState(() => _selectedIndex = i);
         },
         destinations: _currentTabKeys().map((key) {
           switch (key) {
             case 'home':
               return const NavigationDestination(
-                icon: Icon(Icons.space_dashboard_outlined),
-                selectedIcon: Icon(Icons.space_dashboard),
+                icon: Icon(Icons.home_outlined),
+                selectedIcon: Icon(Icons.home_rounded),
                 label: 'Home',
               );
             case 'habits':
@@ -1604,6 +1554,35 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Widget _buildDashboardView() {
     final pendingTasks = tasks.where((t) => t.status == 'pending').toList();
 
+    if (_taskLoadError != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.cloud_off,
+              size: 48,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Failed to load tasks.',
+              style: GoogleFonts.gabarito(
+                fontSize: 18,
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+              onPressed: _fetchDataFromServer,
+            ),
+          ],
+        ),
+      );
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final double screenWidth = constraints.maxWidth;
@@ -1611,13 +1590,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         final hasHabits = _preloadedHabits.isNotEmpty;
         final scheme = Theme.of(context).colorScheme;
 
+        if (pendingTasks.isEmpty && !hasHabits && !_isStudyPlanSetupComplete) {
+          return _buildEmptyTasksView();
+        }
+
         return ListView(
           padding: const EdgeInsets.symmetric(
             horizontal: 18.0,
           ).copyWith(bottom: 80),
           children: [
             if (pendingTasks.isEmpty)
-              _buildEmptyTasksView()
+              SizedBox(
+                height: constraints.maxHeight * 0.5,
+                child: _buildEmptyTasksView(),
+              )
             else ...[
               const SizedBox(height: 4),
               if (_showQuote)
@@ -1861,63 +1847,58 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ? '${task.name.substring(0, maxTitleChars)}...'
         : task.name;
 
-    return Hero(
-      tag: 'task_hero_${task.id}',
-      child: Material(
-        type: MaterialType.transparency,
-        child: GestureDetector(
-          onTap: () {
-            if (task.taskCategory == "timed" &&
-                task.type == "good" &&
-                task.status == "pending") {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => TimerPage(
-                    task: task,
-                    apiService: _apiService,
-                    onTaskCompleted: () {
-                      _fetchDataFromServer();
-                    },
-                  ),
+    return Material(
+      type: MaterialType.transparency,
+      child: GestureDetector(
+        onTap: () {
+          if (task.taskCategory == "timed" &&
+              task.type == "good" &&
+              task.status == "pending") {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => TimerPage(
+                  task: task,
+                  apiService: _apiService,
+                  onTaskCompleted: () => _fetchDataFromServer(),
                 ),
-              );
-            } else if (task.status == "pending") {
-              _completeTask(originalTaskIndex);
-            }
-          },
-          onLongPress: () => _deleteTask(originalTaskIndex),
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: Theme.of(
-                  context,
-                ).colorScheme.outlineVariant.withOpacity(0.3),
-                width: 1.5,
               ),
+            );
+          } else if (task.status == "pending") {
+            _completeTask(originalTaskIndex);
+          }
+        },
+        onLongPress: () => _deleteTask(originalTaskIndex),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Theme.of(
+                context,
+              ).colorScheme.outlineVariant.withOpacity(0.3),
+              width: 1.5,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildTaskIcon(task, context),
-                const SizedBox(height: 12),
-                Text(
-                  displayTitle,
-                  style: GoogleFonts.gabarito(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildTaskIcon(task, context),
+              const SizedBox(height: 12),
+              Text(
+                displayTitle,
+                style: GoogleFonts.gabarito(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
-                const Spacer(),
-                _buildCompactSubtitle(task, context),
-              ],
-            ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const Spacer(),
+              _buildCompactSubtitle(task, context),
+            ],
           ),
         ),
       ),
@@ -2245,9 +2226,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         builder: (_) => TimerPage(
                           task: task,
                           apiService: _apiService,
-                          onTaskCompleted: () {
-                            _fetchDataFromServer();
-                          },
+                          onTaskCompleted: () => _fetchDataFromServer(),
                         ),
                       ),
                     );
@@ -2266,6 +2245,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     fontWeight: FontWeight.w500,
                     color: Theme.of(context).colorScheme.onSurface,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: _buildTaskSubtitle(task, context),
                 trailing: Icon(
@@ -2453,7 +2434,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   String _capitalize(String s) =>
-      s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+      s.isEmpty ? '' : s[0].toUpperCase() + s.substring(1);
 }
 
 class _StatBadge extends StatelessWidget {

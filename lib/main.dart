@@ -9,33 +9,11 @@ import 'package:flutter/services.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_timezone/flutter_timezone.dart';
-//import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'theme.dart';
 import 'home.dart';
+import 'api_service.dart';
 
-/*final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-    FlutterLocalNotificationsPlugin();
-
-Future<void> _initializeNotifications() async {
-  const AndroidInitializationSettings initializationSettingsAndroid =
-      AndroidInitializationSettings('@mipmap/launcher_icon');
-
-  const DarwinInitializationSettings initializationSettingsIOS =
-      DarwinInitializationSettings(
-        requestAlertPermission: true,
-        requestBadgePermission: true,
-        requestSoundPermission: true,
-      );
-
-  final InitializationSettings initializationSettings = InitializationSettings(
-    android: initializationSettingsAndroid,
-    iOS: initializationSettingsIOS,
-  );
-
-  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
-}
-*/
 Future<void> _initializeTimezone() async {
   tz_data.initializeTimeZones();
   try {
@@ -55,9 +33,6 @@ void main() async {
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   await _initializeTimezone();
-  //  await _initializeNotifications();
-
-  //  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   Client client = Client();
   client
@@ -263,6 +238,8 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
   bool stopCarousel = false;
   final _storage = const FlutterSecureStorage();
   bool _isPasswordVisible = false;
+
+  late final ApiService _apiService = ApiService(account: widget.account);
 
   @override
   void initState() {

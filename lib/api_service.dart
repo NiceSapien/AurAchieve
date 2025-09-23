@@ -17,16 +17,28 @@ class ApiService {
 
   ApiService({required this.account});
 
-  Future<String?> getJwtToken() async {
+  Future<String?> getJwtToken({bool forceRefresh = false}) async {
     return await _storage.read(key: 'jwt_token');
   }
 
-  Future<Map<String, String>> _getHeaders() async {
-    final token = await getJwtToken();
-    return {
+  Future<http.Response> _authedGet(String url, {int retryCount = 0}) async {
+    String? token = await getJwtToken();
+    final headers = {
       'Authorization': token != null ? 'Bearer $token' : '',
       'Content-Type': 'application/json',
     };
+    final resp = await http.get(Uri.parse(url), headers: headers);
+
+    // If JWT expired, try refreshing once
+    if (resp.statusCode == 401 && retryCount == 0) {
+      token = await getJwtToken(forceRefresh: true);
+      final newHeaders = {
+        'Authorization': token != null ? 'Bearer $token' : '',
+        'Content-Type': 'application/json',
+      };
+      return await http.get(Uri.parse(url), headers: newHeaders);
+    }
+    return resp;
   }
 
   List<dynamic> _asList(dynamic v) {
@@ -557,31 +569,78 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> getTasksAndHabits() async {
+    final resp = await _authedGet('$_baseUrl/api/tasks');
+    print('Server response for /api/tasks: ${resp.body}'); // Debug log
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      if (resp.statusCode == 404) {
+        return {'tasks': [], 'habits': []};
+      }
+      throw Exception('Failed to fetch tasks: ${resp.statusCode} ${resp.body}');
+    }
+    final root = await compute(_parseJson, resp.body);
+
+    // FIX: Directly extract lists, fallback to [] if missing
+    final tasks = (root['tasks'] as List?) ?? [];
+    final habits = (root['habits'] as List?) ?? [];
+
+    return {
+      'tasks': tasks,
+      'habits': habits,
+    };
+  }
+
+  Future<Map<String, String>> _getHeaders({bool forceRefresh = false}) async {
+    final token = await getJwtToken(forceRefresh: forceRefresh);
+    return {
+      'Authorization': token != null ? 'Bearer $token' : '',
+      'Content-Type': 'application/json',
+    };
+  }
+
+  List<dynamic> _extractList(dynamic value) {
+    if (value == null) return [];
+    if (value is List) return value;
+    if (value is Map) {
+      final inner =
+          value['data'] ??
+          value['items'] ??
+          value['documents'] ??
+          value['list'];
+      if (inner is List) return inner;
+      if (inner is String) {
+        try {
+          final decoded = jsonDecode(inner);
+          if (decoded is List) return decoded;
+        } catch (_) {}
+      }
+    }
+    if (value is String) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is List) return decoded;
+        if (decoded is Map) {
+          final inner =
+              decoded['data'] ??
+              decoded['items'] ??
+              decoded['documents'] ??
+              decoded['list'];
+          if (inner is List) return inner;
+        }
+      } catch (_) {}
+    }
+    return [];
+  }
+
+  Future<void> createProfile(Map<String, dynamic> profileData) async {
     final headers = await _getHeaders();
     final resp = await http.get(
-      Uri.parse('$_baseUrl/api/tasks'),
+      Uri.parse('$_baseUrl/api/user/profile'),
       headers: headers,
     );
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw Exception(
-        'Failed to fetch dashboard: ${resp.statusCode} ${resp.body}',
+        'Failed to create profile: ${resp.statusCode} ${resp.body}',
       );
     }
-
-    final root = await compute(_parseJson, resp.body);
-
-    List tasks = [];
-    List habits = [];
-    Map<String, dynamic>? studyPlan;
-
-    if (root is Map) {
-      tasks = _asList(root['tasks']);
-      habits = _asList(root['habits']);
-      studyPlan = _asMap(root['studyPlan']);
-    } else if (root is List) {
-      tasks = root;
-    }
-
-    return {'tasks': tasks, 'habits': habits, 'studyPlan': studyPlan};
   }
 }

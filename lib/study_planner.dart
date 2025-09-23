@@ -904,45 +904,51 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
   }
 
   Widget _buildNavigationControls() {
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          TextButton(
-            onPressed: _currentPage == 0
-                ? null
-                : () => _pageController.previousPage(
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.ease,
-                  ),
-            child: const Text('Back'),
-          ),
-          FilledButton(
-            onPressed: !_isNextEnabled() || (_currentPage == 5 && _isGenerating)
-                ? null
-                : () {
-                    if (_currentPage == 1) {
-                      FocusScope.of(context).unfocus();
-                    }
-                    if (_currentPage == 4) {
-                      _pageController.nextPage(
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.only(right: 12.0, left: 12, bottom: 6),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _currentPage > 0
+                ? TextButton(
+                    onPressed: () {
+                      _pageController.previousPage(
                         duration: const Duration(milliseconds: 300),
                         curve: Curves.ease,
                       );
-                      _generateTimetable();
-                    } else if (_currentPage == 5) {
-                      _saveAndFinish();
-                    } else {
-                      _pageController.nextPage(
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.ease,
-                      );
-                    }
-                  },
-            child: Text(_currentPage == 5 ? 'Finish' : 'Next'),
-          ),
-        ],
+                    },
+                    child: const Text('Back'),
+                  )
+                : const SizedBox(width: 60),
+            FilledButton(
+              onPressed:
+                  !_isNextEnabled() || (_currentPage == 5 && _isGenerating)
+                  ? null
+                  : () {
+                      if (_currentPage == 1) {
+                        FocusScope.of(context).unfocus();
+                      }
+                      if (_currentPage == 4) {
+                        _pageController.nextPage(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.ease,
+                        );
+                        _generateTimetable();
+                      } else if (_currentPage == 5) {
+                        _saveAndFinish();
+                      } else {
+                        _pageController.nextPage(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.ease,
+                        );
+                      }
+                    },
+              child: Text(_currentPage == 5 ? 'Finish' : 'Next'),
+            ),
+          ],
+        ),
       ),
     );
   }

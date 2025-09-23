@@ -523,7 +523,6 @@ class _HabitSetupState extends State<HabitSetup> {
           color: Theme.of(context).colorScheme.primaryContainer,
         ),
         child: Column(
-          // i want to change background color of this Column and columns DO NOT support decoration:.
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
