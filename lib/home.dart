@@ -16,7 +16,7 @@ import 'social_blocker.dart';
 import 'stats.dart';
 import 'api_service.dart';
 import 'widgets/dynamic_color_svg.dart';
-import 'screens/auth_check_screen.dart';
+import 'main.dart' show AuthCheck;
 import 'timer_page.dart';
 import 'study_planner.dart';
 import 'screens/extended_task_list.dart';
@@ -418,16 +418,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> logout() async {
     try {
       await widget.account.deleteSession(sessionId: 'current');
-      await _storage.delete(key: 'jwt_token');
-      if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (context) => AuthCheckScreen(account: widget.account),
-          ),
-          (Route<dynamic> route) => false,
-        );
-      }
-    } catch (e) {}
+    } catch (_) {}
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => AuthCheck(account: widget.account)),
+      (route) => false,
+    );
   }
 
   void _addTask() async {

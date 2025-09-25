@@ -27,9 +27,7 @@ pub get && flutter pub get
 
 4. Update lib/main.dart with you own appwrite project. Do **not** use our project ID!
 
-5. Setup firebase if you want push notifications and upload your `google-services.json` in `android/app` and `GoogleService-Info.plist` in `ios/Runner`.
-
-6. Build. That's all.
+5. Build. That's all.
 
 ```bash
 flutter build apk --debug
@@ -65,6 +63,6 @@ Current goals:
 
 Any amount - Show appreciation and help keep AurAchieve free
 
-**20$** - Buy a domain for the website
-
 **100$** - Publish AurAchieve on the Apple App Store
+
+**1000$** - Buy me a MacBook to make iOS development easier, quicker, more efficient and introduce more features to the iOS version!
