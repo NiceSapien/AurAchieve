@@ -449,18 +449,18 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
 
   Widget _authHeader({required bool isSignup}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 32.0, horizontal: 24.0),
+      padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 24.0),
       child: Column(
         children: [
           SizedBox(
-            height: 150,
+            width: double.infinity,
+            height: 260,
             child: DynamicColorSvg(
-              assetName: 'assets/img/welcome.svg',
+              assetName: 'assets/img/login.svg',
               color: Theme.of(context).colorScheme.primary,
               fit: BoxFit.contain,
             ),
           ),
-          SizedBox(height: 24),
           Text(
             isSignup ? 'Welcome Aboard!' : 'Welcome Back!',
             style: GoogleFonts.ebGaramond(
@@ -871,19 +871,25 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                 ),
               );
             } else {
+              final media = MediaQuery.of(context);
+              final bottomInset = media.viewInsets.bottom;
+              final safeBottom = media.padding.bottom;
+
               currentScreen = SingleChildScrollView(
                 key: const ValueKey('form'),
                 padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(context).viewInsets.bottom > 0
-                      ? MediaQuery.of(context).viewInsets.bottom + 16
-                      : 16.0,
+                  bottom: bottomInset > 0 ? bottomInset + 16 : safeBottom + 48,
                   top: 16.0,
                 ),
-                child: Column(
-                  children: [
-                    _authHeader(isSignup: showSignup),
-                    formWidget ?? SizedBox.shrink(),
-                  ],
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      _authHeader(isSignup: showSignup),
+                      formWidget ?? SizedBox.shrink(),
+                    ],
+                  ),
                 ),
               );
             }
