@@ -65,6 +65,7 @@ class StudyPlannerScreen extends StatefulWidget {
   final ApiService apiService;
   final VoidCallback? onTaskCompleted;
   final Map<String, dynamic>? initialStudyPlan;
+  final bool autoFetchIfMissing;
 
   const StudyPlannerScreen({
     super.key,
@@ -72,6 +73,7 @@ class StudyPlannerScreen extends StatefulWidget {
     required this.apiService,
     this.onTaskCompleted,
     this.initialStudyPlan,
+    this.autoFetchIfMissing = true,
   });
 
   @override
@@ -122,8 +124,25 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
 
     if (widget.initialStudyPlan != null) {
       _parseAndSetPlan(widget.initialStudyPlan);
-    } else {
+    } else if (widget.autoFetchIfMissing) {
       _loadTimetableData();
+    } else {
+      _setStateIfMounted(() {
+        _isSetupComplete = false;
+        _isLoading = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onSetupStateChanged(false);
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant StudyPlannerScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialStudyPlan != oldWidget.initialStudyPlan &&
+        widget.initialStudyPlan != null) {
+      _parseAndSetPlan(widget.initialStudyPlan);
     }
   }
 
@@ -592,9 +611,10 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
 
     if (_currentPage == 2) {
       if (_subjects.isEmpty) return false;
+      final minRequired = _subjects.length == 1 ? 2 : 1;
       return _subjects.every((subj) {
         final chapList = _chapters[subj.name];
-        return chapList != null && chapList.length >= 2;
+        return chapList != null && chapList.length >= minRequired;
       });
     }
     if (_currentPage == 3 && _deadline == null) return false;
@@ -1043,7 +1063,16 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
               itemCount: _subjects.length,
               itemBuilder: (context, index) {
                 final subject = _subjects[index];
-                return Card(
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: ListTile(
                     leading: IconButton(
                       icon: Icon(subject.icon),
@@ -1097,41 +1126,80 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
               itemBuilder: (context, index) {
                 final subject = _subjects[index];
                 final chapterList = _chapters[subject.name] ?? [];
-                return Card(
+
+                return Container(
                   margin: const EdgeInsets.only(bottom: 16),
-                  elevation: 0,
-                  clipBehavior: Clip.antiAlias,
-                  child: ExpansionTile(
-                    leading: Icon(subject.icon),
-                    title: Text(subject.name),
-                    subtitle: Text("${chapterList.length} chapters"),
-                    children: [
-                      ...chapterList.map(
-                        (chap) => ListTile(
-                          title: Text("Ch. ${chap['number']}"),
-                          subtitle: chap['chapterName']!.isNotEmpty
-                              ? Text(chap['chapterName']!)
-                              : const Text(
-                                  'Tap to add name',
-                                  style: TextStyle(
-                                    fontStyle: FontStyle.italic,
-                                    fontSize: 12,
-                                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Theme(
+                    data: Theme.of(
+                      context,
+                    ).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      shape: const Border(),
+                      collapsedShape: const Border(),
+                      tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+                      childrenPadding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                      leading: Icon(subject.icon),
+                      title: Text(subject.name),
+                      subtitle: Text("${chapterList.length} chapters"),
+                      children: [
+                        ...chapterList.map(
+                          (chap) => Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4.0),
+                            child: Material(
+                              color: Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              clipBehavior: Clip.antiAlias,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () => _editChapterName(
+                                  subject.name,
+                                  chap['number']!,
                                 ),
-                          dense: true,
-                          onTap: () =>
-                              _editChapterName(subject.name, chap['number']!),
+                                child: ListTile(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  title: Text("Ch. ${chap['number']}"),
+                                  subtitle:
+                                      (chap['chapterName'] ?? '').isNotEmpty
+                                      ? Text(chap['chapterName']!)
+                                      : const Text(
+                                          'Tap to add name',
+                                          style: TextStyle(
+                                            fontStyle: FontStyle.italic,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                  dense: true,
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: TextButton.icon(
-                          icon: const Icon(Icons.add_circle_outline),
-                          label: const Text("Select Chapters"),
-                          onPressed: () => _showChapterPicker(subject.name),
+
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: TextButton.icon(
+                              icon: const Icon(Icons.add_circle_outline),
+                              label: const Text("Select Chapters"),
+                              onPressed: () => _showChapterPicker(subject.name),
+                            ),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 );
               },
@@ -1221,309 +1289,312 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "Here's Your Plan",
-            style: GoogleFonts.gabarito(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "This is a preview of the generated schedule. You can go back to make changes or drag and drop these across days.",
-            style: TextStyle(
-              fontSize: 16,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: _generatedTimetable.isEmpty
-                ? const Center(
-                    child: Text(
-                      "Could not generate study plan. Check deadline and chapters.",
-                    ),
-                  )
-                : Listener(
-                    onPointerMove: (e) {
-                      if (_draggingPayload != null)
-                        _startAutoScroll(e.position);
-                    },
-                    onPointerUp: (_) => _stopAutoScroll(),
-                    onPointerCancel: (_) => _stopAutoScroll(),
-                    child: ListView.builder(
-                      controller: _previewScrollController,
-                      itemCount: _generatedTimetable.length,
-                      itemBuilder: (context, index) {
-                        final day = _generatedTimetable[index];
-                        final date = DateTime.parse(day['date'] as String);
-                        final tasks = List<Map<String, dynamic>>.from(
-                          day['tasks'] as List,
-                        );
+    if (_generatedTimetable.isEmpty) {
+      return const Center(
+        child: Text(
+          "Could not generate study plan. Check deadline and chapters.",
+        ),
+      );
+    }
 
-                        Widget buildHandle() {
-                          final color = Theme.of(
-                            context,
-                          ).colorScheme.onSurfaceVariant.withOpacity(0.55);
-                          return SizedBox(
-                            width: 28,
-                            height: 52,
-                            child: Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: List.generate(3, (i) {
-                                  return Padding(
-                                    padding: EdgeInsets.only(
-                                      bottom: i == 2 ? 0 : 5,
-                                    ),
-                                    child: Container(
-                                      width: 16,
-                                      height: 2.2,
-                                      decoration: BoxDecoration(
-                                        color: color,
-                                        borderRadius: BorderRadius.circular(2),
-                                      ),
-                                    ),
-                                  );
-                                }),
-                              ),
-                            ),
-                          );
-                        }
-
-                        List<Widget> taskWidgets = [];
-                        if (tasks.isEmpty) {
-                          taskWidgets.add(
-                            _buildTaskTile(
-                              {'type': 'break'},
-                              day['date'] as String,
-                              isPreview: true,
-                            ),
-                          );
-                        } else {
-                          for (int i = 0; i < tasks.length; i++) {
-                            final task = tasks[i];
-                            final isBreak = task['type'] == 'break';
-                            final tile = Stack(
-                              children: [
-                                _buildTaskTile(
-                                  task,
-                                  day['date'],
-                                  isPreview: true,
-                                ),
-                                Positioned(
-                                  right: 0,
-                                  top: 0,
-                                  bottom: 0,
-                                  child: IgnorePointer(
-                                    ignoring: true,
-                                    child: buildHandle(),
-                                  ),
-                                ),
-                              ],
-                            );
-
-                            if (isBreak) {
-                              taskWidgets.add(tile);
-                              continue;
-                            }
-
-                            taskWidgets.add(
-                              LongPressDraggable<Map<String, dynamic>>(
-                                data: {'task': task, 'sourceDate': day['date']},
-                                dragAnchorStrategy: childDragAnchorStrategy,
-                                onDragStarted: () {
-                                  HapticFeedback.mediumImpact();
-                                  setState(
-                                    () => _draggingPayload = {
-                                      'task': task,
-                                      'sourceDate': day['date'],
-                                    },
-                                  );
-                                },
-                                onDragEnd: (_) {
-                                  _stopAutoScroll();
-                                  setState(() => _draggingPayload = null);
-                                },
-                                onDraggableCanceled: (_, __) {
-                                  _stopAutoScroll();
-                                  setState(() => _draggingPayload = null);
-                                },
-                                feedback: Material(
-                                  elevation: 6,
-                                  borderRadius: BorderRadius.circular(12),
-                                  color: Colors.transparent,
-                                  child: ConstrainedBox(
-                                    constraints: BoxConstraints(
-                                      maxWidth:
-                                          MediaQuery.of(context).size.width -
-                                          64,
-                                      minWidth:
-                                          MediaQuery.of(context).size.width -
-                                          64,
-                                    ),
-                                    child: Opacity(
-                                      opacity: 0.95,
-                                      child: _buildTaskTile(
-                                        task,
-                                        day['date'],
-                                        isFeedback: true,
-                                        isPreview: true,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                childWhenDragging: Opacity(
-                                  opacity: 0.35,
-                                  child: tile,
-                                ),
-                                child: tile,
-                              ),
-                            );
-                            if (i == tasks.length - 1) continue;
-                          }
-                        }
-
-                        final isReceiving = _draggingPayload != null;
-
-                        return DragTarget<Map<String, dynamic>>(
-                          builder: (context, candidate, rejected) {
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 180),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  border: isReceiving
-                                      ? Border.all(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary
-                                              .withOpacity(0.35),
-                                          width: 1.4,
-                                        )
-                                      : null,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16.0,
-                                      ),
-                                      child: Text(
-                                        DateFormat('EEEE, MMM d').format(date),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleMedium
-                                            ?.copyWith(
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurface,
-                                            ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    ...taskWidgets,
-                                    if (candidate.isNotEmpty)
-                                      AnimatedContainer(
-                                        duration: const Duration(
-                                          milliseconds: 120,
-                                        ),
-                                        height: 58,
-                                        margin: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 6,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary
-                                              .withOpacity(0.10),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          border: Border.all(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .primary
-                                                .withOpacity(0.4),
-                                          ),
-                                        ),
-                                        child: Center(
-                                          child: Text(
-                                            'Drop here',
-                                            style: TextStyle(
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.primary,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                          onWillAccept: (data) => true,
-                          onAccept: (payload) {
-                            final taskToMove =
-                                payload['task'] as Map<String, dynamic>;
-                            final sourceDateStr =
-                                payload['sourceDate'] as String;
-                            final targetDateStr = day['date'] as String;
-                            if (sourceDateStr == targetDateStr) return;
-
-                            setState(() {
-                              final sourceIndex = _generatedTimetable
-                                  .indexWhere(
-                                    (d) => d['date'] == sourceDateStr,
-                                  );
-                              final targetIndex = _generatedTimetable
-                                  .indexWhere(
-                                    (d) => d['date'] == targetDateStr,
-                                  );
-                              if (sourceIndex == -1 || targetIndex == -1)
-                                return;
-                              final sourceTasks =
-                                  List<Map<String, dynamic>>.from(
-                                    _generatedTimetable[sourceIndex]['tasks']
-                                        as List,
-                                  );
-                              final targetTasks =
-                                  List<Map<String, dynamic>>.from(
-                                    _generatedTimetable[targetIndex]['tasks']
-                                        as List,
-                                  );
-                              sourceTasks.removeWhere(
-                                (t) => t['id'] == taskToMove['id'],
-                              );
-                              targetTasks.removeWhere(
-                                (t) => t['type'] == 'break',
-                              );
-                              targetTasks.add(taskToMove);
-                              _generatedTimetable[sourceIndex]['tasks'] =
-                                  sourceTasks;
-                              _generatedTimetable[targetIndex]['tasks'] =
-                                  targetTasks;
-                              _draggingPayload = null;
-                            });
-                          },
-                        );
-                      },
+    return Listener(
+      onPointerMove: (e) {
+        if (_draggingPayload != null) _startAutoScroll(e.position);
+      },
+      onPointerUp: (_) => _stopAutoScroll(),
+      onPointerCancel: (_) => _stopAutoScroll(),
+      child: CustomScrollView(
+        controller: _previewScrollController,
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Here's Your Plan",
+                    style: GoogleFonts.gabarito(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "This is a preview of the generated schedule. You can go back to make changes or drag and drop these across days.",
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            sliver: SliverList.builder(
+              itemCount: _generatedTimetable.length,
+              itemBuilder: (context, index) {
+                final day = _generatedTimetable[index];
+                final date = DateTime.parse(day['date'] as String);
+                final tasks = List<Map<String, dynamic>>.from(
+                  day['tasks'] as List,
+                );
+
+                Widget buildHandle() {
+                  final color = Theme.of(
+                    context,
+                  ).colorScheme.onSurfaceVariant.withOpacity(0.55);
+                  return SizedBox(
+                    width: 24,
+                    height: 44,
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: List.generate(2, (i) {
+                          return Padding(
+                            padding: EdgeInsets.only(bottom: i == 1 ? 0 : 5),
+                            child: Container(
+                              width: 14,
+                              height: 2.2,
+                              decoration: BoxDecoration(
+                                color: color,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                  );
+                }
+
+                List<Widget> taskWidgets = [];
+                if (tasks.isEmpty) {
+                  taskWidgets.add(
+                    _buildTaskTile(
+                      {'type': 'break'},
+                      day['date'] as String,
+                      isPreview: true,
+                    ),
+                  );
+                } else {
+                  for (int i = 0; i < tasks.length; i++) {
+                    final task = tasks[i];
+                    final isBreak = task['type'] == 'break';
+
+                    final tile = Stack(
+                      children: [
+                        _buildTaskTile(task, day['date'], isPreview: true),
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 8.0),
+                            child: IgnorePointer(
+                              ignoring: true,
+                              child: buildHandle(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+
+                    if (isBreak) {
+                      taskWidgets.add(tile);
+                      continue;
+                    }
+
+                    taskWidgets.add(
+                      LongPressDraggable<Map<String, dynamic>>(
+                        data: {
+                          'task': task,
+                          'sourceDate': day['date'],
+                          'sourceIndex': i,
+                        },
+                        dragAnchorStrategy: childDragAnchorStrategy,
+                        onDragStarted: () {
+                          HapticFeedback.mediumImpact();
+                          setState(
+                            () => _draggingPayload = {
+                              'task': task,
+                              'sourceDate': day['date'],
+                              'sourceIndex': i,
+                            },
+                          );
+                        },
+                        onDragEnd: (_) {
+                          _stopAutoScroll();
+                          setState(() => _draggingPayload = null);
+                        },
+                        onDraggableCanceled: (_, __) {
+                          _stopAutoScroll();
+                          setState(() => _draggingPayload = null);
+                        },
+                        feedback: Material(
+                          elevation: 6,
+                          borderRadius: BorderRadius.circular(12),
+                          color: Colors.transparent,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: MediaQuery.of(context).size.width - 64,
+                              minWidth: MediaQuery.of(context).size.width - 64,
+                            ),
+                            child: Opacity(
+                              opacity: 0.95,
+                              child: _buildTaskTile(
+                                task,
+                                day['date'],
+                                isFeedback: true,
+                                isPreview: true,
+                              ),
+                            ),
+                          ),
+                        ),
+                        childWhenDragging: Opacity(opacity: 0.35, child: tile),
+                        child: tile,
+                      ),
+                    );
+                    if (i == tasks.length - 1) continue;
+                  }
+                }
+
+                final isReceiving = _draggingPayload != null;
+                final scheme = Theme.of(context).colorScheme;
+                final baseBorder = Border.all(
+                  color: scheme.outlineVariant.withOpacity(0.35),
+                  width: 1.2,
+                );
+                final highlightBorder = Border.all(
+                  color: scheme.primary.withOpacity(0.55),
+                  width: 1.6,
+                );
+
+                return DragTarget<Map<String, dynamic>>(
+                  builder: (context, candidate, rejected) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          borderRadius: BorderRadius.circular(12),
+
+                          border: candidate.isNotEmpty || isReceiving
+                              ? highlightBorder
+                              : baseBorder,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16.0,
+                              ),
+                              child: Text(
+                                DateFormat('EEEE, MMM d').format(date),
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurface,
+                                    ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            ...taskWidgets,
+                            if (candidate.isNotEmpty)
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 120),
+                                height: 58,
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.primary.withOpacity(0.10),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary.withOpacity(0.4),
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    'Drop here',
+                                    style: TextStyle(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.primary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                  onWillAccept: (data) => true,
+                  onAccept: (payload) {
+                    final taskToMove = payload['task'] as Map<String, dynamic>;
+                    final sourceDateStr = payload['sourceDate'] as String;
+                    final sourceItemIndex = payload['sourceIndex'] as int?;
+                    final targetDateStr = day['date'] as String;
+                    if (sourceDateStr == targetDateStr) return;
+
+                    setState(() {
+                      final sourceIndex = _generatedTimetable.indexWhere(
+                        (d) => d['date'] == sourceDateStr,
+                      );
+                      final targetIndex = _generatedTimetable.indexWhere(
+                        (d) => d['date'] == targetDateStr,
+                      );
+                      if (sourceIndex == -1 || targetIndex == -1) return;
+
+                      final sourceTasks = List<Map<String, dynamic>>.from(
+                        _generatedTimetable[sourceIndex]['tasks'] as List,
+                      );
+                      final targetTasks = List<Map<String, dynamic>>.from(
+                        _generatedTimetable[targetIndex]['tasks'] as List,
+                      );
+
+                      if (sourceItemIndex != null &&
+                          sourceItemIndex >= 0 &&
+                          sourceItemIndex < sourceTasks.length) {
+                        sourceTasks.removeAt(sourceItemIndex);
+                      } else {
+                        sourceTasks.removeWhere(
+                          (t) =>
+                              (t['id'] != null &&
+                                  t['id'] == taskToMove['id']) ||
+                              (t['type'] == taskToMove['type'] &&
+                                  t['content']?['subject'] ==
+                                      taskToMove['content']?['subject'] &&
+                                  t['content']?['chapterNumber'] ==
+                                      taskToMove['content']?['chapterNumber']),
+                        );
+                      }
+
+                      targetTasks.removeWhere((t) => t['type'] == 'break');
+                      targetTasks.add(taskToMove);
+
+                      _generatedTimetable[sourceIndex]['tasks'] = sourceTasks;
+                      _generatedTimetable[targetIndex]['tasks'] = targetTasks;
+                      _draggingPayload = null;
+                    });
+                  },
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -1616,17 +1687,21 @@ class _ChapterPickerDialogState extends State<ChapterPickerDialog> {
         height: 300,
         child: Column(
           children: [
-            Expanded(
+            SizedBox(
+              height: 236,
               child: PageView.builder(
                 controller: _pageController,
                 itemCount: _totalPages,
                 onPageChanged: (page) => setState(() => _currentPage = page),
                 itemBuilder: (context, pageIndex) {
                   return GridView.builder(
+                    padding: EdgeInsets.zero,
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 5,
-                          childAspectRatio: 1.2,
+                          childAspectRatio: 1.1,
+                          mainAxisSpacing: 8,
+                          crossAxisSpacing: 8,
                         ),
                     itemCount: _chaptersPerPage,
                     itemBuilder: (context, gridIndex) {
@@ -1674,6 +1749,7 @@ class _ChapterPickerDialogState extends State<ChapterPickerDialog> {
                 },
               ),
             ),
+            const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [

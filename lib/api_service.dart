@@ -9,15 +9,43 @@ dynamic _parseJson(String jsonString) {
   return jsonDecode(jsonString);
 }
 
-class ApiService {
-  final String _baseUrl =
+class AppConfig {
+  static const String defaultBaseUrl =
       'https://ubiquitous-waddle-557rj9965pwh7q7g-3000.app.github.dev';
+  static String baseUrl = defaultBaseUrl;
+
+  static void setBaseUrl(String newUrl) {
+    if (newUrl.isNotEmpty &&
+        (newUrl.startsWith('http://') || newUrl.startsWith('https://'))) {
+      baseUrl = newUrl.endsWith('/')
+          ? newUrl.substring(0, newUrl.length - 1)
+          : newUrl;
+    }
+  }
+
+  static void resetToDefault() {
+    baseUrl = defaultBaseUrl;
+  }
+}
+
+class ApiService {
   final Account account;
   final _storage = const FlutterSecureStorage();
 
   ApiService({required this.account});
 
   Future<String?> getJwtToken({bool forceRefresh = false}) async {
+    if (forceRefresh) {
+      try {
+        final jwt = await account.createJWT();
+        await _storage.write(key: 'jwt_token', value: jwt.jwt);
+        return jwt.jwt;
+      } catch (e) {
+        print("Failed to refresh JWT: $e");
+        await _storage.delete(key: 'jwt_token');
+        return null;
+      }
+    }
     return await _storage.read(key: 'jwt_token');
   }
 
@@ -29,7 +57,6 @@ class ApiService {
     };
     final resp = await http.get(Uri.parse(url), headers: headers);
 
-    // If JWT expired, try refreshing once
     if (resp.statusCode == 401 && retryCount == 0) {
       token = await getJwtToken(forceRefresh: true);
       final newHeaders = {
@@ -88,7 +115,7 @@ class ApiService {
   Future<Map<String, dynamic>> getUserProfile() async {
     final headers = await _getHeaders();
     final response = await http.get(
-      Uri.parse('$_baseUrl/api/user/profile'),
+      Uri.parse('${AppConfig.baseUrl}/api/user/profile'),
       headers: headers,
     );
 
@@ -105,7 +132,7 @@ class ApiService {
   Future<List<dynamic>> getTasks() async {
     final headers = await _getHeaders();
     final response = await http.get(
-      Uri.parse('$_baseUrl/api/tasks'),
+      Uri.parse('${AppConfig.baseUrl}/api/tasks'),
       headers: headers,
     );
     if (response.statusCode == 200) {
@@ -125,7 +152,7 @@ class ApiService {
   }) async {
     final headers = await _getHeaders();
     final response = await http.post(
-      Uri.parse('$_baseUrl/api/tasks'),
+      Uri.parse('${AppConfig.baseUrl}/api/tasks'),
       headers: headers,
       body: jsonEncode({
         'name': name,
@@ -146,7 +173,7 @@ class ApiService {
   Future<void> deleteTask(String taskId) async {
     final headers = await _getHeaders();
     final response = await http.delete(
-      Uri.parse('$_baseUrl/api/tasks/$taskId'),
+      Uri.parse('${AppConfig.baseUrl}/api/tasks/$taskId'),
       headers: headers,
     );
     if (response.statusCode != 200 && response.statusCode != 204) {
@@ -159,7 +186,9 @@ class ApiService {
   ) async {
     final headers = await _getHeaders();
     final response = await http.post(
-      Uri.parse('$_baseUrl/api/tasks/$taskId/complete-normal-non-verifiable'),
+      Uri.parse(
+        '${AppConfig.baseUrl}/api/tasks/$taskId/complete-normal-non-verifiable',
+      ),
       headers: headers,
       body: jsonEncode({'verificationType': 'honor'}),
     );
@@ -178,7 +207,7 @@ class ApiService {
   ) async {
     final headers = await _getHeaders();
     final response = await http.post(
-      Uri.parse('$_baseUrl/api/tasks/$taskId/complete'),
+      Uri.parse('${AppConfig.baseUrl}/api/tasks/$taskId/complete'),
       headers: headers,
       body: jsonEncode({
         'verificationType': 'image',
@@ -197,7 +226,7 @@ class ApiService {
   Future<Map<String, dynamic>> completeBadTask(String taskId) async {
     final headers = await _getHeaders();
     final response = await http.post(
-      Uri.parse('$_baseUrl/api/tasks/$taskId/complete-bad'),
+      Uri.parse('${AppConfig.baseUrl}/api/tasks/$taskId/complete-bad'),
       headers: headers,
       body: jsonEncode({'verificationType': 'bad_task_completion'}),
     );
@@ -220,7 +249,7 @@ class ApiService {
     }
 
     final response = await http.post(
-      Uri.parse('$_baseUrl/api/tasks/$taskId/complete-timed'),
+      Uri.parse('${AppConfig.baseUrl}/api/tasks/$taskId/complete-timed'),
       headers: headers,
       body: jsonEncode(body),
     );
@@ -234,7 +263,7 @@ class ApiService {
   Future<Map<String, dynamic>> markTaskAsBad(String taskId) async {
     final headers = await _getHeaders();
     final response = await http.put(
-      Uri.parse('$_baseUrl/api/tasks/$taskId/mark-bad'),
+      Uri.parse('${AppConfig.baseUrl}/api/tasks/$taskId/mark-bad'),
       headers: headers,
     );
     if (response.statusCode == 200) {
@@ -247,7 +276,7 @@ class ApiService {
   Future<Map<String, dynamic>?> getSocialBlockerData() async {
     final headers = await _getHeaders();
     final response = await http.get(
-      Uri.parse('$_baseUrl/api/social-blocker/get'),
+      Uri.parse('${AppConfig.baseUrl}/api/social-blocker/get'),
       headers: headers,
     );
     if (response.statusCode == 200) {
@@ -270,7 +299,7 @@ class ApiService {
     final headers = await _getHeaders();
     final user = await account.get();
     final response = await http.post(
-      Uri.parse('$_baseUrl/api/social-blocker'),
+      Uri.parse('${AppConfig.baseUrl}/api/social-blocker'),
       headers: headers,
       body: jsonEncode({
         'userId': user.$id,
@@ -287,7 +316,7 @@ class ApiService {
     final headers = await _getHeaders();
     final user = await account.get();
     final response = await http.post(
-      Uri.parse('$_baseUrl/api/social-blocker/end'),
+      Uri.parse('${AppConfig.baseUrl}/api/social-blocker/end'),
       headers: headers,
       body: jsonEncode({
         'hasEnded': true,
@@ -306,7 +335,7 @@ class ApiService {
     final headers = await _getHeaders();
     final clientDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final response = await http.get(
-      Uri.parse('$_baseUrl/api/study-plan?clientDate=$clientDate'),
+      Uri.parse('${AppConfig.baseUrl}/api/study-plan?clientDate=$clientDate'),
       headers: headers,
     );
 
@@ -342,7 +371,7 @@ class ApiService {
     };
 
     final response = await http.post(
-      Uri.parse('$_baseUrl/api/study-plan/generate'),
+      Uri.parse('${AppConfig.baseUrl}/api/study-plan/generate'),
       headers: headers,
       body: jsonEncode(body),
     );
@@ -370,7 +399,7 @@ class ApiService {
     };
 
     final response = await http.post(
-      Uri.parse('$_baseUrl/api/study-plan'),
+      Uri.parse('${AppConfig.baseUrl}/api/study-plan'),
       headers: headers,
       body: jsonEncode(body),
     );
@@ -389,7 +418,7 @@ class ApiService {
     final headers = await _getHeaders();
     final clientDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final response = await http.post(
-      Uri.parse('$_baseUrl/api/study-plan/tasks/$taskId/complete'),
+      Uri.parse('${AppConfig.baseUrl}/api/study-plan/tasks/$taskId/complete'),
       headers: headers,
       body: jsonEncode({'clientDate': clientDate, 'dateOfTask': dateOfTask}),
     );
@@ -403,7 +432,7 @@ class ApiService {
   Future<void> deleteStudyPlan() async {
     final headers = await _getHeaders();
     final response = await http.delete(
-      Uri.parse('$_baseUrl/api/study-plan'),
+      Uri.parse('${AppConfig.baseUrl}/api/study-plan'),
       headers: headers,
     );
     if (response.statusCode != 204) {
@@ -421,7 +450,7 @@ class ApiService {
     final headers = await _getHeaders();
     final cdJson = jsonEncode(completedDays ?? <String>[]);
     final response = await http.post(
-      Uri.parse('$_baseUrl/api/habit'),
+      Uri.parse('${AppConfig.baseUrl}/api/habit'),
       headers: headers,
       body: jsonEncode({
         'habitName': habitName,
@@ -440,7 +469,7 @@ class ApiService {
   Future<List<dynamic>> getHabits() async {
     final headers = await _getHeaders();
     final res = await http.get(
-      Uri.parse('$_baseUrl/api/habit'),
+      Uri.parse('${AppConfig.baseUrl}/api/habit'),
       headers: headers,
     );
     if (res.statusCode != 200) {
@@ -494,7 +523,7 @@ class ApiService {
     final headers = await _getHeaders();
     final cdJson = jsonEncode(completedDays);
     final response = await http.put(
-      Uri.parse('$_baseUrl/api/habit'),
+      Uri.parse('${AppConfig.baseUrl}/api/habit'),
       headers: headers,
       body: jsonEncode({
         'habitId': habitId,
@@ -559,7 +588,7 @@ class ApiService {
   Future<void> deleteHabit(String habitId) async {
     final headers = await _getHeaders();
     final res = await http.delete(
-      Uri.parse('$_baseUrl/api/habit'),
+      Uri.parse('${AppConfig.baseUrl}/api/habit'),
       headers: headers,
       body: jsonEncode({'habitId': habitId}),
     );
@@ -569,23 +598,36 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> getTasksAndHabits() async {
-    final resp = await _authedGet('$_baseUrl/api/tasks');
-    print('Server response for /api/tasks: ${resp.body}'); // Debug log
+    final resp = await _authedGet('${AppConfig.baseUrl}/api/tasks');
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       if (resp.statusCode == 404) {
-        return {'tasks': [], 'habits': []};
+        return {
+          'tasks': [],
+          'habits': [],
+          'studyPlan': null,
+          'userId': null,
+          'name': null,
+          'email': null,
+          'aura': null,
+          'validationCount': null,
+          'lastValidationResetDate': null,
+          'quote': null,
+        };
       }
       throw Exception('Failed to fetch tasks: ${resp.statusCode} ${resp.body}');
     }
     final root = await compute(_parseJson, resp.body);
-
-    // FIX: Directly extract lists, fallback to [] if missing
-    final tasks = (root['tasks'] as List?) ?? [];
-    final habits = (root['habits'] as List?) ?? [];
-
     return {
-      'tasks': tasks,
-      'habits': habits,
+      'tasks': (root['tasks'] as List?) ?? const [],
+      'habits': (root['habits'] as List?) ?? const [],
+      'studyPlan': root['studyPlan'],
+      'userId': root['userId'],
+      'name': root['name'],
+      'email': root['email'],
+      'aura': root['aura'],
+      'validationCount': root['validationCount'],
+      'lastValidationResetDate': root['lastValidationResetDate'],
+      'quote': root['quote'],
     };
   }
 
@@ -633,9 +675,10 @@ class ApiService {
 
   Future<void> createProfile(Map<String, dynamic> profileData) async {
     final headers = await _getHeaders();
-    final resp = await http.get(
-      Uri.parse('$_baseUrl/api/user/profile'),
+    final resp = await http.post(
+      Uri.parse('${AppConfig.baseUrl}/api/profile'),
       headers: headers,
+      body: jsonEncode(profileData),
     );
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw Exception(

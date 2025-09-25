@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:http/http.dart' as http;
 
 import 'theme.dart';
 import 'home.dart';
@@ -40,6 +41,7 @@ void main() async {
       .setProject('6800a2680008a268a6a3')
       .setSelfSigned(status: true);
   Account account = Account(client);
+  AppConfig.resetToDefault();
   runApp(MyApp(account: account));
 }
 
@@ -130,6 +132,7 @@ class _AuthCheckState extends State<AuthCheck> {
       });
     } catch (e) {
       await _storage.delete(key: 'jwt_token');
+      AppConfig.resetToDefault();
       setState(() {
         isLoading = false;
         loggedInUser = null;
@@ -238,6 +241,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
   bool stopCarousel = false;
   final _storage = const FlutterSecureStorage();
   bool _isPasswordVisible = false;
+  int _tapCount = 0;
 
   late final ApiService _apiService = ApiService(account: widget.account);
 
@@ -250,7 +254,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
   void _autoPlayFeatures() async {
     const int featureCount = 6;
     while (mounted && !stopCarousel) {
-      await Future.delayed(const Duration(seconds: 3));
+      await Future.delayed(const Duration(seconds: 5));
       if (!mounted || stopCarousel) break;
       int next = (_featurePage + 1) % featureCount;
       if (_featureController.hasClients) {
@@ -261,6 +265,113 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
         );
       }
     }
+  }
+
+  void _showApiEndpointDialog() {
+    final controller = TextEditingController(text: AppConfig.baseUrl);
+    String? errorText;
+    bool isLoading = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            final theme = Theme.of(context);
+
+            Future<void> checkAndSaveEndpoint() async {
+              setState(() {
+                isLoading = true;
+                errorText = null;
+              });
+
+              final url = controller.text.trim();
+              if (url.isEmpty ||
+                  !(url.startsWith('http://') || url.startsWith('https://'))) {
+                setState(() {
+                  errorText = 'Please enter a valid URL (http/https).';
+                  isLoading = false;
+                });
+                return;
+              }
+
+              try {
+                final response = await http
+                    .get(Uri.parse(url))
+                    .timeout(const Duration(seconds: 5));
+
+                if (response.statusCode == 200 &&
+                    response.body == 'feel alive.') {
+                  AppConfig.setBaseUrl(url);
+                  if (mounted) {
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('API endpoint updated for this session.'),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                } else {
+                  setState(() {
+                    errorText = 'Invalid endpoint or server not responding.';
+                    isLoading = false;
+                  });
+                }
+              } catch (e) {
+                setState(() {
+                  errorText = 'Failed to connect to the endpoint.';
+                  isLoading = false;
+                });
+              }
+            }
+
+            return AlertDialog(
+              title: Text(
+                'Server API Endpoint',
+                style: TextStyle(color: theme.colorScheme.onSurface),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: controller,
+                    decoration: InputDecoration(
+                      hintText: 'http://localhost:3000',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      errorText: errorText,
+                    ),
+                    style: TextStyle(color: theme.colorScheme.onSurface),
+                    enabled: !isLoading,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isLoading
+                      ? null
+                      : () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: isLoading ? null : checkAndSaveEndpoint,
+                  child: isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void showError(String msg) {
@@ -697,61 +808,71 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
 
             Widget currentScreen;
             if (!showForm) {
-              currentScreen = Column(
-                key: ValueKey('carousel'),
-                children: [
-                  Expanded(child: _featuresCarousel()),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 16,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        FilledButton.icon(
-                          icon: Icon(Icons.rocket_launch_rounded),
-                          onPressed: () => setState(() {
-                            showSignup = true;
-                            stopCarousel = true;
-                          }),
-                          label: Text(
-                            'Get Started',
-                            style: GoogleFonts.gabarito(fontSize: 18),
-                          ),
-                          style: FilledButton.styleFrom(
-                            minimumSize: Size(double.infinity, 48),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
+              currentScreen = GestureDetector(
+                onTap: () {
+                  setState(() => _tapCount++);
+                  if (_tapCount >= 7) {
+                    _tapCount = 0;
+                    _showApiEndpointDialog();
+                  }
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Column(
+                  key: const ValueKey('carousel'),
+                  children: [
+                    Expanded(child: _featuresCarousel()),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 16,
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          FilledButton.icon(
+                            icon: Icon(Icons.rocket_launch_rounded),
+                            onPressed: () => setState(() {
+                              showSignup = true;
+                              stopCarousel = true;
+                            }),
+                            label: Text(
+                              'Get Started',
+                              style: GoogleFonts.gabarito(fontSize: 18),
+                            ),
+                            style: FilledButton.styleFrom(
+                              minimumSize: Size(double.infinity, 48),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
                             ),
                           ),
-                        ),
-                        SizedBox(height: 16),
-                        OutlinedButton.icon(
-                          icon: Icon(Icons.login_rounded),
-                          onPressed: () => setState(() {
-                            showLogin = true;
-                            stopCarousel = true;
-                          }),
-                          label: Text(
-                            'Login',
-                            style: GoogleFonts.gabarito(fontSize: 18),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: Size(double.infinity, 48),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
+                          SizedBox(height: 16),
+                          OutlinedButton.icon(
+                            icon: Icon(Icons.login_rounded),
+                            onPressed: () => setState(() {
+                              showLogin = true;
+                              stopCarousel = true;
+                            }),
+                            label: Text(
+                              'Login',
+                              style: GoogleFonts.gabarito(fontSize: 18),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: Size(double.infinity, 48),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               );
             } else {
               currentScreen = SingleChildScrollView(
-                key: ValueKey('form'),
+                key: const ValueKey('form'),
                 padding: EdgeInsets.only(
                   bottom: MediaQuery.of(context).viewInsets.bottom > 0
                       ? MediaQuery.of(context).viewInsets.bottom + 16

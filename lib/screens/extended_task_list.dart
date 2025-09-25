@@ -160,7 +160,7 @@ class _AllTasksScreenState extends State<AllTasksScreen>
     return Scaffold(
       appBar: AppBar(
         title: Hero(
-          tag: 'your_tasks_title',
+          tag: 'tasks_header_hero_v2',
           child: Material(
             type: MaterialType.transparency,
             child: Text(

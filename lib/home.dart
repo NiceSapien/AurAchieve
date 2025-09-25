@@ -94,6 +94,40 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   int _selectedIndex = 0;
   bool _isTimetableSetupInProgress = true;
 
+  Widget _buildEmptyTasksView() {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          DynamicColorSvg(
+            assetName: 'assets/img/empty_tasks.svg',
+            color: scheme.primary,
+            width: 240,
+            height: 240,
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'No active tasks',
+            style: GoogleFonts.gabarito(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              color: scheme.outline,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Add a task from the button below.',
+            style: GoogleFonts.gabarito(
+              fontSize: 14,
+              color: scheme.outline.withOpacity(0.7),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   final GlobalKey<State<StatefulWidget>> _habitsKey =
       GlobalKey<State<StatefulWidget>>();
   final GlobalKey<State<StatefulWidget>> _blockerKey =
@@ -139,6 +173,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Timer? _helloTitleTimer;
 
   String? _taskLoadError;
+  String? _quoteText;
+  String? _quoteAuthor;
 
   @override
   void initState() {
@@ -257,7 +293,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Future<void> _initApp() async {
     await _loadUserName();
-    await _fetchUserProfile();
     await _fetchDataFromServer();
   }
 
@@ -300,19 +335,75 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     });
     try {
       final dashboard = await _apiService.getTasksAndHabits();
+
       final fetchedTasks = (dashboard['tasks'] as List?) ?? const [];
       final fetchedHabits = (dashboard['habits'] as List?) ?? const [];
-
       final allTasks = fetchedTasks
           .map((t) => Task.fromJson(t as Map<String, dynamic>))
           .toList();
 
+      Map<String, dynamic>? planMap;
+      final sp = dashboard['studyPlan'];
+      if (sp is List && sp.isNotEmpty) {
+        final first = sp.first;
+        if (first is Map) {
+          planMap = Map<String, dynamic>.from(first as Map);
+        }
+      } else if (sp is Map) {
+        planMap = Map<String, dynamic>.from(sp as Map);
+      }
+
       setState(() {
+        final apiName = (dashboard['name'] as String?)?.trim();
+        if (apiName != null && apiName.isNotEmpty) userName = apiName;
+
+        final auraValue = dashboard['aura'];
+        if (auraValue is num) {
+          aura = auraValue.toInt();
+        } else if (auraValue is String) {
+          final parsed = int.tryParse(auraValue);
+          if (parsed != null) aura = parsed;
+        }
+
+        final q = dashboard['quote'];
+        if (q is Map) {
+          _quoteText = (q['quote'] as String?)?.trim();
+          _quoteAuthor = (q['author'] as String?)?.trim();
+        }
+
         completedTasks = allTasks
             .where((t) => t.status == 'completed')
             .toList();
         tasks = allTasks.where((t) => t.status == 'pending').toList();
         _preloadedHabits = fetchedHabits;
+
+        _studyPlanMap = planMap;
+        _isStudyPlanSetupComplete = planMap != null && planMap.isNotEmpty;
+
+        _subjects = [];
+        if (planMap != null) {
+          final subjectsJson = planMap['subjects'];
+          if (subjectsJson is List) {
+            _subjects = subjectsJson
+                .whereType<Map>()
+                .map((m) => Subject.fromJson(Map<String, dynamic>.from(m)))
+                .toList();
+          }
+
+          _todaysStudyPlan = [];
+          final timetable = planMap['timetable'];
+          if (timetable is List) {
+            final todayStr = _todayDateStringLocal();
+            final today = timetable.whereType<Map>().firstWhere(
+              (d) => d['date'] == todayStr,
+              orElse: () => const {'date': '', 'tasks': <dynamic>[]},
+            );
+            final tasksList = (today['tasks'] as List?) ?? const [];
+            _todaysStudyPlan = tasksList.whereType<Map>().map((e) {
+              return Map<String, dynamic>.from(e);
+            }).toList();
+          }
+        }
       });
     } catch (e) {
       setState(() {
@@ -962,6 +1053,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           apiService: _apiService,
           onTaskCompleted: _fetchDataFromServer,
           initialStudyPlan: _studyPlanMap,
+          autoFetchIfMissing: false,
         ),
       );
       keys.add('planner');
@@ -991,6 +1083,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           apiService: _apiService,
           onTaskCompleted: _fetchDataFromServer,
           initialStudyPlan: _studyPlanMap,
+          autoFetchIfMissing: false,
         );
       case 'home':
       default:
@@ -1041,6 +1134,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         apiService: _apiService,
         onTaskCompleted: _fetchDataFromServer,
         initialStudyPlan: _studyPlanMap,
+        autoFetchIfMissing: false,
       ),
     ];
 
@@ -1167,7 +1261,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         children: [
           if (showHeader) const SizedBox(height: 8),
           Expanded(
-            child: IndexedStack(index: _selectedIndex, children: tabScreens),
+            child: IndexedStack(
+              index: _selectedIndex,
+              children: [
+                _buildDashboardView(),
+                HabitsPage(
+                  apiService: _apiService,
+                  initialHabits: _preloadedHabits,
+                ),
+                SocialMediaBlockerScreen(
+                  apiService: _apiService,
+                  onChallengeCompleted: _fetchDataFromServer,
+                ),
+                StudyPlannerScreen(
+                  onSetupStateChanged: _updateTimetableSetupState,
+                  apiService: _apiService,
+                  onTaskCompleted: _fetchDataFromServer,
+                  initialStudyPlan: _studyPlanMap,
+                  autoFetchIfMissing: false,
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1630,7 +1744,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           Text(
-                            'Make them realise that they lost a diamond while playing with worthless stones',
+                            _quoteText?.isNotEmpty == true
+                                ? _quoteText!
+                                : 'Make them realise that they lost a diamond while playing with worthless stones',
                             style: GoogleFonts.gabarito(
                               fontSize: 16,
                               fontWeight: FontWeight.w500,
@@ -1645,7 +1761,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           Align(
                             alignment: Alignment.centerRight,
                             child: Text(
-                              "- Captain Underpants",
+                              _quoteAuthor?.isNotEmpty == true
+                                  ? '- ${_quoteAuthor!}'
+                                  : '- Captain Underpants',
                               style: GoogleFonts.ebGaramond(
                                 fontSize: 14,
                                 color: Theme.of(
@@ -1675,7 +1793,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Hero(
-                    tag: 'your_tasks_title',
+                    tag: 'tasks_header_hero',
                     child: Material(
                       type: MaterialType.transparency,
                       child: Text(
@@ -1693,19 +1811,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       icon: const Icon(Icons.arrow_forward_rounded),
                       onPressed: () {
                         Navigator.of(context).push(
-                          PageRouteBuilder(
-                            pageBuilder:
-                                (context, animation, secondaryAnimation) =>
-                                    AllTasksScreen(
-                                      tasks: tasks,
-                                      allPendingTasks: pendingTasks,
-                                      onCompleteTask: _completeTask,
-                                      onDeleteTask: _deleteTask,
-                                      buildTaskIcon: _buildTaskIcon,
-                                      buildTaskSubtitle: _buildTaskSubtitle,
-                                      apiService: _apiService,
-                                      onTaskCompleted: _fetchDataFromServer,
-                                    ),
+                          MaterialPageRoute(
+                            builder: (context) => AllTasksScreen(
+                              tasks: tasks,
+                              allPendingTasks: pendingTasks,
+                              onCompleteTask: _completeTask,
+                              onDeleteTask: _deleteTask,
+                              buildTaskIcon: _buildTaskIcon,
+                              buildTaskSubtitle: _buildCompactSubtitle,
+                              apiService: _apiService,
+                              onTaskCompleted: _fetchDataFromServer,
+                            ),
                           ),
                         );
                       },
@@ -2133,300 +2249,42 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildEmptyTasksView() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          DynamicColorSvg(
-            assetName: 'assets/img/empty_tasks.svg',
-            height: 180,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'No active tasks.',
-            style: GoogleFonts.gabarito(
-              fontSize: 20,
-              fontWeight: FontWeight.w500,
-              color: Theme.of(context).colorScheme.outline,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Add new tasks to get started.',
-            style: GoogleFonts.gabarito(
-              fontSize: 16,
-              color: Theme.of(context).colorScheme.outline,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTasksView() {
-    final pendingTasks = tasks.where((t) => t.status == 'pending').toList();
-    if (pendingTasks.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            DynamicColorSvg(
-              assetName: 'assets/img/empty_tasks.svg',
-              height: 180,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'No active tasks.',
-              style: GoogleFonts.gabarito(
-                fontSize: 20,
-                fontWeight: FontWeight.w500,
-                color: Theme.of(context).colorScheme.outline,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Add new tasks to get started.',
-              style: GoogleFonts.gabarito(
-                fontSize: 16,
-                color: Theme.of(context).colorScheme.outline,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.separated(
-      padding: const EdgeInsets.only(bottom: 80),
-      itemCount: pendingTasks.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (context, index) {
-        final task = pendingTasks[index];
-        final originalTaskIndex = tasks.indexOf(task);
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18.0, vertical: 4),
-          child: GestureDetector(
-            onLongPress: () => _deleteTask(originalTaskIndex),
-            child: Material(
-              elevation: 2,
-              borderRadius: BorderRadius.circular(18),
-              color: Theme.of(context).colorScheme.surfaceContainerHigh,
-              child: ListTile(
-                onTap: () {
-                  if (task.taskCategory == "timed" &&
-                      task.type == "good" &&
-                      task.status == "pending") {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => TimerPage(
-                          task: task,
-                          apiService: _apiService,
-                          onTaskCompleted: () => _fetchDataFromServer(),
-                        ),
-                      ),
-                    );
-                  } else if (task.status == "pending") {
-                    _completeTask(originalTaskIndex);
-                  }
-                },
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                leading: _buildTaskIcon(task, context),
-                title: Text(
-                  task.name,
-                  style: GoogleFonts.gabarito(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w500,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: _buildTaskSubtitle(task, context),
-                trailing: Icon(
-                  Icons.arrow_forward_ios_rounded,
-                  size: 18,
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.onSurfaceVariant.withOpacity(0.6),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildTaskIcon(Task task, BuildContext context) {
-    if (task.type == "bad") {
-      return CircleAvatar(
-        backgroundColor: Colors.purple.shade100,
-        child: Icon(
-          Icons.warning_amber_rounded,
-          color: Colors.purple,
-          size: 26,
-        ),
-      );
-    }
-    if (task.taskCategory == "timed") {
-      return CircleAvatar(
-        backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
-        child: Icon(
-          Icons.timer_outlined,
-          color: Theme.of(context).colorScheme.onTertiaryContainer,
-          size: 26,
-        ),
-      );
-    }
-    return _materialYouTaskIcon(task.intensity, context);
-  }
-
-  Widget _buildTaskSubtitle(Task task, BuildContext context) {
-    List<Widget> subtitleChildren = [];
-
-    if (task.type == "bad") {
-      subtitleChildren.add(
-        Text(
-          "Bad Task - ${_capitalize(task.intensity)}",
-          style: GoogleFonts.gabarito(
-            fontSize: 13,
-            color: Colors.purple,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      );
-      if (task.taskCategory == 'timed' && task.durationMinutes != null) {
-        subtitleChildren.add(
-          Text(
-            " (${task.durationMinutes} min)",
-            style: GoogleFonts.gabarito(
-              fontSize: 12,
-              color: Colors.purple.withOpacity(0.8),
-            ),
-          ),
-        );
-      }
-    } else {
-      subtitleChildren.add(
-        Text(
-          _capitalize(task.intensity),
-          style: GoogleFonts.gabarito(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-        ),
-      );
-
-      if (task.taskCategory == 'timed' && task.durationMinutes != null) {
-        subtitleChildren.add(
-          Text(
-            " - Timed (${task.durationMinutes} min)",
-            style: GoogleFonts.gabarito(
-              fontSize: 12,
-              color: Theme.of(context).colorScheme.secondary,
-            ),
-          ),
-        );
-      } else {
-        subtitleChildren.add(SizedBox(width: 4));
-        subtitleChildren.add(
-          Icon(
-            task.isImageVerifiable
-                ? Icons.camera_alt_outlined
-                : Icons.check_circle_outline,
-            size: 14,
-            color: task.isImageVerifiable
-                ? Colors.blueGrey
-                : Colors.green.shade700,
-          ),
-        );
-        subtitleChildren.add(SizedBox(width: 2));
-        subtitleChildren.add(
-          Text(
-            task.isImageVerifiable ? "Photo" : "Honor",
-            style: GoogleFonts.gabarito(
-              fontSize: 11,
-              color: task.isImageVerifiable
-                  ? Colors.blueGrey
-                  : Colors.green.shade700,
-            ),
-          ),
-        );
-
-        subtitleChildren.add(Spacer());
-        subtitleChildren.add(
-          TextButton.icon(
-            style: TextButton.styleFrom(
-              minimumSize: Size(0, 0),
-              padding: EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
-            ),
-            icon: Icon(
-              Icons.flag_outlined,
-              size: 16,
-              color: Colors.orange.shade700,
-            ),
-            label: Text(
-              "Flag as Bad",
-              style: GoogleFonts.gabarito(
-                fontSize: 11,
-                color: Colors.orange.shade700,
-              ),
-            ),
-            onPressed: () => _markTaskAsBadClientSide(tasks.indexOf(task)),
-          ),
-        );
-      }
-    }
-    return Row(children: subtitleChildren);
-  }
-
   Widget _materialYouTaskIcon(String intensity, BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     switch (intensity.toLowerCase()) {
       case 'easy':
         return CircleAvatar(
-          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+          backgroundColor: cs.primaryContainer,
           child: Icon(
             Icons.eco_rounded,
-            color: Theme.of(context).colorScheme.onPrimaryContainer,
+            color: cs.onPrimaryContainer,
             size: 26,
           ),
         );
       case 'medium':
         return CircleAvatar(
-          backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+          backgroundColor: cs.secondaryContainer,
           child: Icon(
             Icons.bolt_rounded,
-            color: Theme.of(context).colorScheme.onSecondaryContainer,
+            color: cs.onSecondaryContainer,
             size: 26,
           ),
         );
       case 'hard':
         return CircleAvatar(
-          backgroundColor: Theme.of(context).colorScheme.errorContainer,
+          backgroundColor: cs.errorContainer,
           child: Icon(
             Icons.whatshot_rounded,
-            color: Theme.of(context).colorScheme.onErrorContainer,
+            color: cs.onErrorContainer,
             size: 26,
           ),
         );
       default:
         return CircleAvatar(
-          backgroundColor: Theme.of(
-            context,
-          ).colorScheme.surfaceContainerHighest,
+          backgroundColor: cs.surfaceContainerHighest,
           child: Icon(
             Icons.task_alt_rounded,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            color: cs.onSurfaceVariant,
             size: 26,
           ),
         );
@@ -2435,6 +2293,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   String _capitalize(String s) =>
       s.isEmpty ? '' : s[0].toUpperCase() + s.substring(1);
+
+  Widget _buildTaskIcon(Task task, BuildContext context) {
+    return _materialYouTaskIcon(task.intensity, context);
+  }
 }
 
 class _StatBadge extends StatelessWidget {
@@ -2444,6 +2306,7 @@ class _StatBadge extends StatelessWidget {
   final Color textColor;
 
   const _StatBadge({
+    super.key,
     required this.value,
     required this.icon,
     required this.color,
