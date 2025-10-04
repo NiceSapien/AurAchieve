@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:dynamic_color/dynamic_color.dart';
@@ -10,6 +11,7 @@ import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 import 'theme.dart';
 import 'home.dart';
@@ -267,6 +269,12 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
     }
   }
 
+  Future<void> _launchUrl(String url) async {
+    if (!await launchUrl(Uri.parse(url))) {
+      showError('Could not launch URL');
+    }
+  }
+
   void _showApiEndpointDialog() {
     final controller = TextEditingController(text: AppConfig.baseUrl);
     String? errorText;
@@ -405,21 +413,16 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
         password: passwordController.text,
         name: nameController.text.trim(),
       );
-
       await widget.account.createEmailPasswordSession(
         email: emailController.text.trim(),
         password: passwordController.text,
       );
       final jwt = await widget.account.createJWT();
       await _storage.write(key: 'jwt_token', value: jwt.jwt);
-
       TextInput.finishAutofillContext();
-
       await _handleSuccessfulAuth();
     } catch (e) {
-      showError(
-        'Registration failed: ${e.toString().replaceAll('AppwriteException: ', '')}',
-      );
+      showError('Registration failed: ${e.toString().replaceAll('AppwriteException: ', '')}');
     }
     if (mounted) {
       setState(() => isBusy = false);
@@ -438,48 +441,170 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
       await _storage.write(key: 'jwt_token', value: jwt.jwt);
       await _handleSuccessfulAuth();
     } catch (e) {
-      showError(
-        'Login failed: ${e.toString().replaceAll('AppwriteException: ', '')}',
-      );
+      showError('Login failed: ${e.toString().replaceAll('AppwriteException: ', '')}');
     }
     if (mounted) {
       setState(() => isBusy = false);
     }
   }
 
+  void _showVerificationSentDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Verify Your Email'),
+          content: const Text(
+            "We've sent you a verification email. Please click on the link in your inbox and reopen the app to continue.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                setState(() {
+                  showSignup = false;
+                  showLogin = false;
+                  stopCarousel = false;
+                  Future.microtask(_autoPlayFeatures);
+                });
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showForgotPasswordDialog() {
+    final TextEditingController forgotEmailController = TextEditingController();
+    String? errorText;
+    bool isSending = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: !isSending,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            final theme = Theme.of(context);
+
+            Future<void> sendResetLink() async {
+              final email = forgotEmailController.text.trim();
+              if (email.isEmpty) {
+                setStateDialog(() {
+                  errorText = 'Please enter your email.';
+                });
+                return;
+              }
+
+              setStateDialog(() {
+                isSending = true;
+                errorText = null;
+              });
+
+              try {
+                await widget.account.createRecovery(
+                  email: email,
+                  url: 'https://aurachieve.authui.site/forgot-password-finish',
+                );
+                if (mounted) {
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Password reset link sent to your email.'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              } catch (e) {
+                setStateDialog(() {
+                  errorText = 'Failed to send link. Wrong email, probably.';
+                  isSending = false;
+                });
+              }
+            }
+
+            return AlertDialog(
+              title: Text(
+                'Forgot Password',
+                style: TextStyle(color: theme.colorScheme.onSurface),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "We'll send you a password reset email.",
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: forgotEmailController,
+                    keyboardType: TextInputType.emailAddress,
+                    autofocus: true,
+                    style: TextStyle(color: theme.colorScheme.onSurface),
+                    decoration: InputDecoration(
+                      labelText: 'Email',
+                      errorText: errorText,
+                    ),
+                    enabled: !isSending,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSending
+                      ? null
+                      : () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: isSending ? null : sendResetLink,
+                  child: isSending
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Send'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _authHeader({required bool isSignup}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 24.0),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: double.infinity,
-            height: 260,
-            child: DynamicColorSvg(
-              assetName: 'assets/img/login.svg',
-              color: Theme.of(context).colorScheme.primary,
-              fit: BoxFit.contain,
-            ),
-          ),
           Text(
-            isSignup ? 'Welcome Aboard!' : 'Welcome Back!',
+            isSignup ? 'Welcome aboard!' : 'Welcome Back!',
             style: GoogleFonts.ebGaramond(
               fontSize: 32,
               fontWeight: FontWeight.bold,
               color: Theme.of(context).colorScheme.primary,
             ),
-            textAlign: TextAlign.center,
+            textAlign: TextAlign.start,
           ),
           SizedBox(height: 8),
           Text(
             isSignup
-                ? 'Can\'t wait to see a better you.'
+                ? 'We\'re glad to have you here. Can\'t wait to see a better version of you!'
                 : 'Glad to see you again!',
-            style: GoogleFonts.ebGaramond(
+            style: GoogleFonts.gabarito(
               fontSize: 18,
               color: Theme.of(context).colorScheme.secondary,
             ),
-            textAlign: TextAlign.center,
+            textAlign: TextAlign.start,
           ),
         ],
       ),
@@ -676,35 +801,6 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
               autofillHints: [AutofillHints.newPassword],
               textInputAction: TextInputAction.done,
             ),
-            SizedBox(height: 24),
-            FilledButton.icon(
-              icon: Icon(Icons.person_add_alt_1_rounded),
-              onPressed: isBusy ? null : register,
-              label: isBusy
-                  ? SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text('Sign Up', style: GoogleFonts.gabarito(fontSize: 18)),
-              style: FilledButton.styleFrom(
-                minimumSize: Size(double.infinity, 48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-            SizedBox(height: 12),
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  showSignup = false;
-                  stopCarousel = false;
-                  Future.microtask(_autoPlayFeatures);
-                });
-              },
-              child: Text('Back', style: GoogleFonts.gabarito()),
-            ),
           ],
         ),
       ),
@@ -716,6 +812,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24.0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             TextField(
               controller: emailController,
@@ -756,35 +853,58 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
               obscureText: !_isPasswordVisible,
               autofillHints: [AutofillHints.password],
             ),
-            SizedBox(height: 24),
-            FilledButton.icon(
-              icon: Icon(Icons.login_rounded),
-              onPressed: isBusy ? null : login,
-              label: isBusy
-                  ? SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text('Login', style: GoogleFonts.gabarito(fontSize: 18)),
-              style: FilledButton.styleFrom(
-                minimumSize: Size(double.infinity, 48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+            TextButton(
+              onPressed: _showForgotPasswordDialog,
+              child: Text(
+                'Forgot Password?',
+                style: GoogleFonts.gabarito(
+                  color: Theme.of(context).colorScheme.secondary,
                 ),
               ),
             ),
-            SizedBox(height: 12),
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  showLogin = false;
-                  stopCarousel = false;
-                  Future.microtask(_autoPlayFeatures);
-                });
-              },
-              child: Text('Back', style: GoogleFonts.gabarito()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLegalText() {
+    final theme = Theme.of(context);
+    final linkStyle = TextStyle(
+      color: theme.colorScheme.primary,
+      decoration: TextDecoration.underline,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+      child: RichText(
+        textAlign: TextAlign.center,
+        text: TextSpan(
+          style: TextStyle(
+            fontSize: 12,
+            color: theme.colorScheme.onSurface.withOpacity(0.6),
+            fontFamily: GoogleFonts.gabarito().fontFamily,
+          ),
+          children: [
+            const TextSpan(text: 'By continuing, you agree to our '),
+            TextSpan(
+              text: 'Terms & Conditions',
+              style: linkStyle,
+              recognizer: TapGestureRecognizer()
+                ..onTap = () {
+                  _launchUrl('https://google.com');
+                },
             ),
+            const TextSpan(text: ' and '),
+            TextSpan(
+              text: 'Privacy Policy',
+              style: linkStyle,
+              recognizer: TapGestureRecognizer()
+                ..onTap = () {
+                  _launchUrl('https://google.com');
+                },
+            ),
+            const TextSpan(text: '.'),
           ],
         ),
       ),
@@ -841,9 +961,6 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                             ),
                             style: FilledButton.styleFrom(
                               minimumSize: Size(double.infinity, 48),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
                             ),
                           ),
                           SizedBox(height: 16),
@@ -859,9 +976,6 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                             ),
                             style: OutlinedButton.styleFrom(
                               minimumSize: Size(double.infinity, 48),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
                             ),
                           ),
                         ],
@@ -871,26 +985,79 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                 ),
               );
             } else {
-              final media = MediaQuery.of(context);
-              final bottomInset = media.viewInsets.bottom;
-              final safeBottom = media.padding.bottom;
-
-              currentScreen = SingleChildScrollView(
-                key: const ValueKey('form'),
-                padding: EdgeInsets.only(
-                  bottom: bottomInset > 0 ? bottomInset + 16 : safeBottom + 48,
-                  top: 16.0,
-                ),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      _authHeader(isSignup: showSignup),
-                      formWidget ?? SizedBox.shrink(),
-                    ],
+              currentScreen = Column(
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      key: const ValueKey('form'),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(height: 24),
+                          _authHeader(isSignup: showSignup),
+                          SizedBox(height: 24),
+                          formWidget ?? SizedBox.shrink(),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+                  Padding(
+                    padding: EdgeInsets.only(
+                      left: 24,
+                      right: 24,
+                      bottom: MediaQuery.of(context).padding.bottom > 0
+                          ? MediaQuery.of(context).padding.bottom
+                          : 16,
+                      top: 8,
+                    ),
+                    child: Column(
+                      children: [
+                        _buildLegalText(),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  showLogin = false;
+                                  showSignup = false;
+                                  stopCarousel = false;
+                                  Future.microtask(_autoPlayFeatures);
+                                });
+                              },
+                              child: Text(
+                                'Back',
+                                style: GoogleFonts.gabarito(),
+                              ),
+                            ),
+                            FilledButton.icon(
+                              icon: Icon(
+                                showSignup
+                                    ? Icons.person_add_alt_1_rounded
+                                    : Icons.login_rounded,
+                              ),
+                              onPressed: isBusy
+                                  ? null
+                                  : (showSignup ? register : login),
+                              label: isBusy
+                                  ? SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : Text(
+                                      showSignup ? 'Sign Up' : 'Login',
+                                      style: GoogleFonts.gabarito(fontSize: 18),
+                                    ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               );
             }
 
