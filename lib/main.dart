@@ -422,7 +422,9 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
       TextInput.finishAutofillContext();
       await _handleSuccessfulAuth();
     } catch (e) {
-      showError('Registration failed: ${e.toString().replaceAll('AppwriteException: ', '')}');
+      showError(
+        'Registration failed: ${e.toString().replaceAll('AppwriteException: ', '')}',
+      );
     }
     if (mounted) {
       setState(() => isBusy = false);
@@ -441,7 +443,9 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
       await _storage.write(key: 'jwt_token', value: jwt.jwt);
       await _handleSuccessfulAuth();
     } catch (e) {
-      showError('Login failed: ${e.toString().replaceAll('AppwriteException: ', '')}');
+      showError(
+        'Login failed: ${e.toString().replaceAll('AppwriteException: ', '')}',
+      );
     }
     if (mounted) {
       setState(() => isBusy = false);

@@ -11,7 +11,7 @@ dynamic _parseJson(String jsonString) {
 
 class AppConfig {
   static const String defaultBaseUrl =
-      'https://ubiquitous-waddle-557rj9965pwh7q7g-3000.app.github.dev';
+      'https://auraascend-fgf4aqf5gubgacb3.centralindia-01.azurewebsites.net';
   static String baseUrl = defaultBaseUrl;
 
   static void setBaseUrl(String newUrl) {
