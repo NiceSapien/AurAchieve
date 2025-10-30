@@ -116,7 +116,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
   ];
 
   bool? _lastReportedSetupComplete;
-  bool _notifiedOnceAfterMount = false;
+  final bool _notifiedOnceAfterMount = false;
 
   @override
   void initState() {
@@ -1483,7 +1483,6 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                         decoration: BoxDecoration(
                           color: Theme.of(context).colorScheme.surface,
                           borderRadius: BorderRadius.circular(12),
-
                           border: candidate.isNotEmpty || isReceiving
                               ? highlightBorder
                               : baseBorder,
@@ -1543,11 +1542,12 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                       ),
                     );
                   },
-                  onWillAccept: (data) => true,
-                  onAccept: (payload) {
-                    final taskToMove = payload['task'] as Map<String, dynamic>;
-                    final sourceDateStr = payload['sourceDate'] as String;
-                    final sourceItemIndex = payload['sourceIndex'] as int?;
+                  onWillAcceptWithDetails: (data) => true,
+                  onAcceptWithDetails: (details) {
+                    final data = details.data;
+                    final taskToMove = data['task'] as Map<String, dynamic>;
+                    final sourceDateStr = data['sourceDate'] as String;
+                    final sourceItemIndex = data['sourceIndex'] as int?;
                     final targetDateStr = day['date'] as String;
                     if (sourceDateStr == targetDateStr) return;
 

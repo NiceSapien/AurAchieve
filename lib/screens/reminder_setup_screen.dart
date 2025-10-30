@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -7,7 +5,6 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
 
 import '../api_service.dart';
-import '../main.dart';
 
 class ReminderSetupScreen extends StatefulWidget {
   final ApiService apiService;

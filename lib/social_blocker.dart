@@ -37,12 +37,15 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
   bool _isTimeUp = false;
   bool _isCompleting = false;
   bool _isPasswordVisible = false;
+  bool _gaveUp = false;
+  bool _isOfflineMode = false;
 
   String? _generatedPassword;
   String? _finishedPassword;
   DateTime? _timeoutDate;
   DateTime? _setupDate;
   int? _blockerDays = 7;
+  int? _completedDaysOnFinish;
   tz.TZDateTime? _calculatedEndDate;
   String? _durationErrorText;
 
@@ -88,13 +91,40 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
     setState(() => _isLoading = true);
     final prefs = await SharedPreferences.getInstance();
     final isFinished = prefs.getBool('sm_blocker_is_finished') ?? false;
+    final isOffline = prefs.getBool('sm_blocker_is_offline') ?? false;
 
     if (isFinished) {
       setState(() {
         _isChallengeFinished = true;
         _finishedPassword = prefs.getString('sm_blocker_finished_password');
+        _gaveUp = prefs.getBool('sm_blocker_gave_up') ?? false;
+        _completedDaysOnFinish = prefs.getInt('sm_blocker_completed_days');
+        _isOfflineMode = isOffline;
         _isLoading = false;
       });
+      return;
+    }
+
+    if (isOffline) {
+      final setupDateStr = prefs.getString('sm_blocker_setup_date');
+      final timeoutDateStr = prefs.getString('sm_blocker_timeout_date');
+      if (setupDateStr != null && timeoutDateStr != null) {
+        _timeoutDate = DateTime.parse(timeoutDateStr);
+        _setupDate = DateTime.parse(setupDateStr);
+        final isTimeUp = DateTime.now().isAfter(_timeoutDate!);
+        setState(() {
+          _isSetupComplete = true;
+          _isTimeUp = isTimeUp;
+          _isOfflineMode = true;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _isSetupComplete = false;
+          _isOfflineMode = false;
+          _isLoading = false;
+        });
+      }
       return;
     }
 
@@ -143,10 +173,35 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
     print("SOCIAL_BLOCKER: Completing challenge...");
     setState(() => _isCompleting = true);
 
+    if (_isOfflineMode) {
+      final prefs = await SharedPreferences.getInstance();
+      final password = prefs.getString('sm_blocker_password');
+      final completed = _calculateCompletedDays();
+
+      await prefs.setBool('sm_blocker_is_finished', true);
+      await prefs.setString(
+        'sm_blocker_finished_password',
+        password ?? 'Error',
+      );
+      await prefs.setBool('sm_blocker_gave_up', false);
+      await prefs.setInt('sm_blocker_completed_days', completed);
+
+      setState(() {
+        _isChallengeFinished = true;
+        _finishedPassword = password;
+        _completedDaysOnFinish = completed;
+        _gaveUp = false;
+        _isCompleting = false;
+      });
+      _confettiController.play();
+      return;
+    }
+
     try {
       final result = await widget.apiService.completeSocialBlocker();
       final auraGained = result['aura'] ?? 15;
       final finishedPassword = result['socialPassword'] as String?;
+      final completedDays = result['completedDays'] as int?;
 
       if (finishedPassword == null) {
         throw Exception("Password not received from server on completion.");
@@ -155,6 +210,10 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('sm_blocker_is_finished', true);
       await prefs.setString('sm_blocker_finished_password', finishedPassword);
+      await prefs.setBool('sm_blocker_gave_up', false);
+      if (completedDays != null) {
+        await prefs.setInt('sm_blocker_completed_days', completedDays);
+      }
 
       if (mounted) {
         widget.onChallengeCompleted();
@@ -169,6 +228,8 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
         setState(() {
           _isChallengeFinished = true;
           _finishedPassword = finishedPassword;
+          _completedDaysOnFinish = completedDays;
+          _gaveUp = false;
           _isCompleting = false;
         });
       }
@@ -187,6 +248,82 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
     }
   }
 
+  Future<void> _handleGiveUp() async {
+    if (_isCompleting || _isChallengeFinished) return;
+
+    setState(() => _isCompleting = true);
+
+    if (_isOfflineMode) {
+      final prefs = await SharedPreferences.getInstance();
+      final password = prefs.getString('sm_blocker_password');
+      final completed = _calculateCompletedDays();
+
+      await prefs.setBool('sm_blocker_is_finished', true);
+      await prefs.setString(
+        'sm_blocker_finished_password',
+        password ?? 'Error',
+      );
+      await prefs.setBool('sm_blocker_gave_up', true);
+      await prefs.setInt('sm_blocker_completed_days', completed);
+
+      setState(() {
+        _isChallengeFinished = true;
+        _finishedPassword = password;
+        _completedDaysOnFinish = completed;
+        _gaveUp = true;
+        _isCompleting = false;
+      });
+      return;
+    }
+
+    try {
+      final result = await widget.apiService.giveUpSocialBlocker();
+      final auraGained = result['aura'] ?? 0;
+      final finishedPassword = result['socialPassword'] as String?;
+      final completedDays = result['completedDays'] as int?;
+
+      if (finishedPassword == null) {
+        throw Exception("Password not received from server on give up.");
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('sm_blocker_is_finished', true);
+      await prefs.setString('sm_blocker_finished_password', finishedPassword);
+      await prefs.setBool('sm_blocker_gave_up', true);
+      if (completedDays != null) {
+        await prefs.setInt('sm_blocker_completed_days', completedDays);
+      }
+
+      if (mounted) {
+        widget.onChallengeCompleted();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Challenge ended. You have gained $auraGained aura.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+
+        setState(() {
+          _isChallengeFinished = true;
+          _finishedPassword = finishedPassword;
+          _completedDaysOnFinish = completedDays;
+          _gaveUp = true;
+          _isCompleting = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error giving up: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() => _isCompleting = false);
+      }
+    }
+  }
+
   Future<void> _setupBlocker() async {
     print("SOCIAL_BLOCKER: _setupBlocker function has been called.");
     if (_blockerDays == null || _generatedPassword == null) {
@@ -195,6 +332,30 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
     }
 
     setState(() => _isLoading = true);
+
+    if (_isOfflineMode) {
+      final prefs = await SharedPreferences.getInstance();
+      final now = DateTime.now();
+      final timeout = now.add(Duration(days: _blockerDays!));
+
+      await prefs.setBool('sm_blocker_is_offline', true);
+      await prefs.setString('sm_blocker_password', _generatedPassword!);
+      await prefs.setString('sm_blocker_setup_date', now.toIso8601String());
+      await prefs.setString(
+        'sm_blocker_timeout_date',
+        timeout.toIso8601String(),
+      );
+
+      setState(() {
+        _isSetupComplete = true;
+        _isTimeUp = false;
+        _setupDate = now;
+        _timeoutDate = timeout;
+        _isLoading = false;
+      });
+      return;
+    }
+
     try {
       await widget.apiService.setupSocialBlocker(
         socialEndDays: _blockerDays!,
@@ -227,6 +388,70 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
         context,
       ).showSnackBar(SnackBar(content: Text('Failed to setup blocker: $e')));
     }
+  }
+
+  int _calculateCompletedDays() {
+    if (_setupDate == null) return 0;
+    final today = DateTime.now();
+    final start = _setupDate!;
+
+    final startDate = DateTime(start.year, start.month, start.day);
+    final todayDate = DateTime(today.year, today.month, today.day);
+
+    final difference = todayDate.difference(startDate).inDays;
+    return difference >= 0 ? difference : 0;
+  }
+
+  Future<void> _showGiveUpDialog() async {
+    final estimatedAura = _calculateCompletedDays() * 10;
+
+    return showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        final theme = Theme.of(context);
+        return AlertDialog(
+          backgroundColor: theme.colorScheme.surface,
+          title: Text(
+            'Are you sure?',
+            style: TextStyle(color: theme.colorScheme.onSurface),
+          ),
+          content: SingleChildScrollView(
+            child: ListBody(
+              children: <Widget>[
+                Text(
+                  'Giving up now will end the challenge. You will get your password back, but you will only receive a fraction of the aura.',
+                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Estimated aura gain: ${_isOfflineMode ? 0 : estimatedAura}',
+                  style: TextStyle(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: theme.colorScheme.error,
+              ),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _handleGiveUp();
+              },
+              child: const Text('Give Up'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _showRestartDialog() async {
@@ -268,10 +493,110 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
     );
   }
 
-  Future<void> _resetBlocker() async {
+  Future<void> _showContinueDialog() async {
+    final TextEditingController daysController = TextEditingController(
+      text: '7',
+    );
+    String? errorText;
+
+    return showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            final theme = Theme.of(context);
+            return AlertDialog(
+              backgroundColor: theme.colorScheme.surface,
+              title: Text(
+                'Continue Challenge?',
+                style: TextStyle(color: theme.colorScheme.onSurface),
+              ),
+              content: SingleChildScrollView(
+                child: ListBody(
+                  children: <Widget>[
+                    Text(
+                      'We will use your current password to start a new challenge immediately. Enter how many days to continue.',
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: daysController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      autofocus: true,
+                      style: TextStyle(color: theme.colorScheme.onSurface),
+                      decoration: InputDecoration(
+                        labelText: 'Days',
+                        errorText: errorText,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('Cancel'),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+                FilledButton(
+                  child: const Text('Start'),
+                  onPressed: () {
+                    final days = int.tryParse(daysController.text);
+                    if (days == null || days <= 0) {
+                      setStateDialog(() => errorText = 'Invalid days');
+                      return;
+                    }
+                    if (days > 365) {
+                      setStateDialog(() => errorText = 'Max 365 days');
+                      return;
+                    }
+                    if (_finishedPassword == null ||
+                        _finishedPassword!.isEmpty) {
+                      setStateDialog(() => errorText = 'No password available');
+                      return;
+                    }
+                    Navigator.of(context).pop();
+                    _continueChallenge(days);
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _continueChallenge(int days) async {
+    final wasOffline = _isOfflineMode;
+    final samePassword = _finishedPassword;
+    await _resetBlocker(fullReset: false, preserveOfflineFlag: wasOffline);
+    setState(() {
+      _isOfflineMode = wasOffline;
+      _blockerDays = days;
+      _generatedPassword = samePassword;
+    });
+    await _setupBlocker();
+  }
+
+  Future<void> _resetBlocker({
+    bool fullReset = true,
+    bool preserveOfflineFlag = false,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('sm_blocker_is_finished');
     await prefs.remove('sm_blocker_finished_password');
+    await prefs.remove('sm_blocker_gave_up');
+    await prefs.remove('sm_blocker_completed_days');
+    await prefs.remove('sm_blocker_password');
+    await prefs.remove('sm_blocker_setup_date');
+    await prefs.remove('sm_blocker_timeout_date');
+    await prefs.remove('sm_blocker_is_offline');
 
     setState(() {
       _isSetupComplete = false;
@@ -282,11 +607,16 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
       _timeoutDate = null;
       _setupDate = null;
       _blockerDays = 7;
+      _completedDaysOnFinish = null;
+      _gaveUp = false;
+      _isOfflineMode = preserveOfflineFlag ? true : false;
       _durationController.text = '7';
       _calculateInitialEndDate();
-      _currentPage = 0;
-      if (_pageController.hasClients) {
-        _pageController.jumpToPage(0);
+      if (fullReset) {
+        _currentPage = 0;
+        if (_pageController.hasClients) {
+          _pageController.jumpToPage(0);
+        }
       }
     });
   }
@@ -341,7 +671,7 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
         'svg': 'assets/img/timeout.svg',
         'title': 'You\'ll set a timeout',
         'desc':
-            "You'll let us know how many days you want to stay away from social media. We'll give you aura and your password after these days are over.",
+            "You'll let us know how many days you want to stay away from social media. We'll give you the password back only after the timeout ends.",
       },
     ];
 
@@ -350,93 +680,76 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
         Expanded(
           child: PageView(
             controller: _pageController,
-            onPageChanged: (page) => setState(() => _currentPage = page),
+            onPageChanged: (page) {
+              setState(() {
+                _currentPage = page;
+              });
+            },
             children: [
-              _buildFeaturePage(
-                features[0]['svg']!,
-                features[0]['title']!,
-                features[0]['desc']!,
-              ),
-              _buildFeaturePage(
-                features[1]['svg']!,
-                features[1]['title']!,
-                features[1]['desc']!,
-              ),
-              _buildFeaturePage(
-                features[2]['svg']!,
-                features[2]['title']!,
-                features[2]['desc']!,
-              ),
-              _buildDurationPickerPage(),
+              ...features.map((feature) {
+                return Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      DynamicColorSvg(
+                        assetName: feature['svg']!,
+                        color: Theme.of(context).colorScheme.primary,
+                        height: 200,
+                      ),
+                      const SizedBox(height: 32),
+                      Text(
+                        feature['title']!,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.gabarito(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        feature['desc']!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+              _buildDurationPage(),
+              _buildSecurityPage(),
               _buildPasswordPage(),
             ],
           ),
         ),
-        SafeArea(top: false, child: _buildNavigationControls()),
+        _buildNavigationControls(),
       ],
     );
   }
 
-  Widget _buildFeaturePage(String asset, String title, String desc) {
+  Widget _buildDurationPage() {
+    final auraGain = (_blockerDays ?? 0) * 3;
     return Padding(
       padding: const EdgeInsets.all(24.0),
-      child: Center(
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                height: 240,
-                child: DynamicColorSvg(
-                  assetName: asset,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-              ),
-              const SizedBox(height: 32),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.gabarito(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                desc,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDurationPickerPage() {
-    int auraGain = (_blockerDays ?? 0) * 15;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32.0),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          const Icon(Icons.timer_rounded, size: 64),
+          const SizedBox(height: 24),
           Text(
-            'Set a duration',
+            'Set your timeout',
             style: GoogleFonts.gabarito(
               fontSize: 24,
               fontWeight: FontWeight.bold,
               color: Theme.of(context).colorScheme.onSurface,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Text(
-            'For how many days do you want to block social media?',
+            'How many days do you want to stay away from social media?',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -446,14 +759,17 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
           TextField(
             controller: _durationController,
             onChanged: (value) {
-              final days = int.tryParse(value);
               setState(() {
-                _blockerDays = days;
+                final days = int.tryParse(value);
                 if (days != null) {
+                  _blockerDays = days;
                   if (days > 365) {
-                    _durationErrorText = 'Maximum 365 days';
+                    _durationErrorText = 'Cannot exceed 365 days';
                     _calculatedEndDate = null;
-                  } else if (days > 0) {
+                  } else if (days <= 0) {
+                    _durationErrorText = 'Must be at least 1 day';
+                    _calculatedEndDate = null;
+                  } else {
                     _durationErrorText = null;
                     final serverTimeZone = tz.getLocation('Asia/Kolkata');
                     final nowOnServer = tz.TZDateTime.now(serverTimeZone);
@@ -469,12 +785,10 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
                       tz.local,
                     );
                     _calculatedEndDate = finalEndDate;
-                  } else {
-                    _durationErrorText = null;
-                    _calculatedEndDate = null;
                   }
                 } else {
-                  _durationErrorText = null;
+                  _blockerDays = null;
+                  _durationErrorText = 'Please enter a valid number';
                   _calculatedEndDate = null;
                 }
               });
@@ -503,7 +817,7 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
           const SizedBox(height: 24),
           if ((_blockerDays ?? 0) > 0 && _durationErrorText == null)
             Text(
-              'Approximate aura gain: $auraGain',
+              'Approximate aura gain: ${_isOfflineMode ? 0 : auraGain}',
               style: GoogleFonts.gabarito(
                 fontSize: 16,
                 color: Theme.of(context).colorScheme.primary,
@@ -532,6 +846,120 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
                 },
               ),
             ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showOfflineModeDialog() async {
+    return showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        final theme = Theme.of(context);
+        return AlertDialog(
+          backgroundColor: theme.colorScheme.surface,
+          title: Text(
+            'Enable Offline Mode?',
+            style: TextStyle(color: theme.colorScheme.onSurface),
+          ),
+          content: SingleChildScrollView(
+            child: ListBody(
+              children: <Widget>[
+                Text(
+                  'Your password will be stored securely on this device. If you uninstall the app or lose your device, the password will be permanently lost.',
+                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'You will not earn any aura for completing the challenge in offline mode.',
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            FilledButton(
+              onPressed: () {
+                setState(() {
+                  _isOfflineMode = true;
+                });
+                Navigator.of(context).pop();
+              },
+              child: const Text('I Understand'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildSecurityPage() {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        children: [
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                DynamicColorSvg(
+                  assetName: 'assets/img/offline_mode.svg',
+                  color: theme.colorScheme.primary,
+                  height: 200,
+                ),
+                const SizedBox(height: 32),
+                Text(
+                  'Your data, truly yours.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.gabarito(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'We will securely store your password on our server, away from any third party\'s access. You can go offline for even more security.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 0,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            tileColor: theme.colorScheme.secondaryContainer,
+            title: const Text('Offline Mode'),
+            subtitle: Text(
+              'No internet needed. No aura gained.',
+              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            value: _isOfflineMode,
+            onChanged: (bool value) {
+              if (value) {
+                _showOfflineModeDialog();
+              } else {
+                setState(() {
+                  _isOfflineMode = false;
+                });
+              }
+            },
+          ),
         ],
       ),
     );
@@ -634,7 +1062,7 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
                 }
               }
 
-              if (_currentPage < 4) {
+              if (_currentPage < 5) {
                 _pageController.nextPage(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.ease,
@@ -643,7 +1071,7 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
                 _setupBlocker();
               }
             },
-            child: Text(_currentPage < 4 ? 'Next' : 'Done'),
+            child: Text(_currentPage < 5 ? 'Next' : 'Done'),
           ),
         ],
       ),
@@ -652,7 +1080,8 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
 
   Widget _buildProgressView() {
     double progress = 0.0;
-    String timeRemaining = "Time's up!";
+    String timeValue = "Time's up!";
+    String timeDescription = "You can now get your password.";
 
     if (!_isTimeUp && _setupDate != null && _timeoutDate != null) {
       final totalDuration = _timeoutDate!.difference(_setupDate!).inSeconds;
@@ -665,13 +1094,14 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
 
       final remaining = _timeoutDate!.difference(DateTime.now());
       if (remaining.isNegative) {
-        timeRemaining = "Time's up!";
+        timeValue = "Time's up!";
+        timeDescription = "You can now get your password.";
       } else {
         final d = remaining.inDays;
         final h = remaining.inHours % 24;
         final m = remaining.inMinutes % 60;
-        timeRemaining =
-            '${d}d ${h}h ${m}m remaining until your social media password is shown';
+        timeValue = '${d}d ${h}h ${m}m';
+        timeDescription = 'remaining until your password is revealed';
       }
     }
 
@@ -680,12 +1110,17 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
         padding: const EdgeInsets.all(24.0),
         child: _isTimeUp
             ? _buildCongratulationsView()
-            : _buildInProgressView(progress, timeRemaining),
+            : _buildInProgressView(progress, timeValue, timeDescription),
       ),
     );
   }
 
-  Widget _buildInProgressView(double progress, String timeRemaining) {
+  Widget _buildInProgressView(
+    double progress,
+    String timeValue,
+    String timeDescription,
+  ) {
+    final theme = Theme.of(context);
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -698,9 +1133,7 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
               CircularProgressIndicator(
                 value: progress,
                 strokeWidth: 12,
-                backgroundColor: Theme.of(
-                  context,
-                ).colorScheme.surfaceContainerHighest,
+                backgroundColor: theme.colorScheme.surfaceContainerHighest,
               ),
               Center(
                 child: Text(
@@ -708,7 +1141,7 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
                   style: GoogleFonts.gabarito(
                     fontSize: 40,
                     fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.onSurface,
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
               ),
@@ -717,12 +1150,31 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
         ),
         const SizedBox(height: 32),
         Text(
-          timeRemaining,
+          timeValue,
           textAlign: TextAlign.center,
           style: GoogleFonts.gabarito(
-            fontSize: 22,
-            color: Theme.of(context).colorScheme.onSurface,
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: theme.colorScheme.onSurface,
           ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          timeDescription,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 16,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 24),
+        OutlinedButton(
+          onPressed: _isCompleting ? null : _showGiveUpDialog,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: theme.colorScheme.error,
+            side: BorderSide(color: theme.colorScheme.error.withOpacity(0.5)),
+          ),
+          child: const Text('Give Up'),
         ),
       ],
     );
@@ -790,7 +1242,9 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    "You've completed the challenge. Here is your password:",
+                    _gaveUp
+                        ? "You've completed the challenge for ${_completedDaysOnFinish ?? 0} days. Here is your password:"
+                        : "You've completed the challenge. Here is your password:",
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -831,30 +1285,41 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
                               });
                             },
                           ),
+                          IconButton(
+                            icon: const Icon(Icons.copy),
+                            onPressed: _finishedPassword == null
+                                ? null
+                                : () {
+                                    Clipboard.setData(
+                                      ClipboardData(text: _finishedPassword!),
+                                    );
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Password copied!'),
+                                      ),
+                                    );
+                                  },
+                          ),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.copy),
-                    label: const Text('Copy Password'),
-                    onPressed: _finishedPassword == null
-                        ? null
-                        : () {
-                            Clipboard.setData(
-                              ClipboardData(text: _finishedPassword!),
-                            );
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Password copied!')),
-                            );
-                          },
-                  ),
-                  const SizedBox(height: 6),
-                  FilledButton.icon(
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Finish & Start New'),
-                    onPressed: _showRestartDialog,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.restart_alt),
+                        label: const Text('Continue again'),
+                        onPressed: _showContinueDialog,
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton.icon(
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Start New'),
+                        onPressed: _showRestartDialog,
+                      ),
+                    ],
                   ),
                 ],
               ),

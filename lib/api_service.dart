@@ -331,6 +331,19 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> giveUpSocialBlocker() async {
+    final headers = await _getHeaders();
+    final response = await http.delete(
+      Uri.parse('${AppConfig.baseUrl}/api/social-blocker/giveup'),
+      headers: headers,
+    );
+    if (response.statusCode == 200) {
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to give up on social blocker: ${response.body}');
+    }
+  }
+
   Future<Map<String, dynamic>?> getStudyPlan() async {
     final headers = await _getHeaders();
     final clientDate = DateFormat('yyyy-MM-dd').format(DateTime.now());

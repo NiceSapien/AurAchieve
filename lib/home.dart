@@ -347,10 +347,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (sp is List && sp.isNotEmpty) {
         final first = sp.first;
         if (first is Map) {
-          planMap = Map<String, dynamic>.from(first as Map);
+          planMap = Map<String, dynamic>.from(first);
         }
       } else if (sp is Map) {
-        planMap = Map<String, dynamic>.from(sp as Map);
+        planMap = Map<String, dynamic>.from(sp);
       }
 
       setState(() {
@@ -2302,7 +2302,6 @@ class _StatBadge extends StatelessWidget {
   final Color textColor;
 
   const _StatBadge({
-    super.key,
     required this.value,
     required this.icon,
     required this.color,
