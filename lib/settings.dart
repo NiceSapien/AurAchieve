@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -26,12 +27,21 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late bool _showQuote;
   late Set<String> _tabs;
+  String? _jwt;
 
   @override
   void initState() {
     super.initState();
     _showQuote = widget.showQuote;
     _tabs = {...widget.enabledTabs};
+    _loadJwt();
+  }
+
+  Future<void> _loadJwt() async {
+    const storage = FlutterSecureStorage();
+    final t = await storage.read(key: 'jwt_token');
+    if (!mounted) return;
+    setState(() => _jwt = t);
   }
 
   void _toggleTab(String key, bool value) {
@@ -295,7 +305,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                   ),
-
                   FilledButton.tonalIcon(
                     style: FilledButton.styleFrom(
                       backgroundColor: cs.errorContainer,
@@ -317,6 +326,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     label: const Text('Log out'),
                   ),
                 ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+          Text(
+            'Development Features',
+            style: GoogleFonts.gabarito(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: cs.onSurfaceVariant,
+              letterSpacing: 0.2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            color: cs.surfaceContainerHigh,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: cs.outlineVariant.withOpacity(0.5)),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () async {
+                if (_jwt == null || _jwt!.isEmpty) return;
+                await Clipboard.setData(ClipboardData(text: _jwt!));
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('JWT copied to clipboard'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+              child: ListTile(
+                leading: const Icon(Icons.key_rounded),
+                title: const Text('JWT Token'),
+                subtitle: Text(
+                  _jwt ?? 'No token available',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontFamily: 'monospace'),
+                ),
+                trailing: const Icon(Icons.copy_rounded),
               ),
             ),
           ),

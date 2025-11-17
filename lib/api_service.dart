@@ -611,7 +611,32 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> getTasksAndHabits() async {
-    final resp = await _authedGet('${AppConfig.baseUrl}/api/tasks');
+    if (AppConfig.baseUrl != AppConfig.defaultBaseUrl) {
+      final headers = await _getHeaders();
+      final resp = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/api/tasks'),
+        headers: headers,
+      );
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        throw Exception('Failed to fetch tasks: ${resp.statusCode} ${resp.body}');
+      }
+      final data = await compute(_parseJson, resp.body);
+      final tasks = data is List ? data : _extractList(data);
+      return {
+        'tasks': tasks,
+        'habits': const [],
+        'studyPlan': null,
+        'userId': null,
+        'name': null,
+        'email': null,
+        'aura': null,
+        'validationCount': null,
+        'lastValidationResetDate': null,
+        'quote': null,
+      };
+    }
+
+    final resp = await _authedGet('https://691ad65c0008a1107855.fra.appwrite.run');
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       if (resp.statusCode == 404) {
         return {

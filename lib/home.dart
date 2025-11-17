@@ -1134,203 +1134,211 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
     ];
 
-    return Scaffold(
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        leading: Padding(
-          padding: const EdgeInsets.only(left: 16.0),
-          child: Chip(
-            shape: const StadiumBorder(),
-            backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
-            side: BorderSide(
-              color: Theme.of(
-                context,
-              ).colorScheme.outlineVariant.withOpacity(0.5),
-            ),
-            avatar: Icon(
-              Icons.auto_awesome_rounded,
-              color: Theme.of(context).colorScheme.primary,
-              size: 20,
-            ),
-            labelPadding: const EdgeInsets.symmetric(horizontal: 8),
-
-            label: ConstrainedBox(
-              constraints: BoxConstraints(minWidth: baseWidth),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 400),
-                transitionBuilder: (child, animation) => FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0.0, 0.5),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
+    return WillPopScope(
+      onWillPop: () async {
+        if (_selectedIndex != 0) {
+          setState(() => _selectedIndex = 0);
+          return false;
+        }
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          elevation: 0,
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          leading: Padding(
+            padding: const EdgeInsets.only(left: 16.0),
+            child: Chip(
+              shape: const StadiumBorder(),
+              backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+              side: BorderSide(
+                color: Theme.of(
+                  context,
+                ).colorScheme.outlineVariant.withOpacity(0.5),
+              ),
+              avatar: Icon(
+                Icons.auto_awesome_rounded,
+                color: Theme.of(context).colorScheme.primary,
+                size: 20,
+              ),
+              labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+              label: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: baseWidth),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 400),
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0.0, 0.5),
+                        end: Offset.zero,
+                      ).animate(animation),
+                      child: child,
+                    ),
                   ),
-                ),
-                child: Text(
-                  currentAuraText,
-                  key: ValueKey<bool>(_showAuraAsText),
-                  textAlign: TextAlign.center,
-                  style: chipTextStyle,
+                  child: Text(
+                    currentAuraText,
+                    key: ValueKey<bool>(_showAuraAsText),
+                    textAlign: TextAlign.center,
+                    style: chipTextStyle,
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-        leadingWidth: leadingW,
-        title: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 350),
-          transitionBuilder: (child, anim) =>
-              FadeTransition(opacity: anim, child: child),
-          child: Text(
-            _titleShowHello ? 'Hello.' : 'AurAchieve',
-            key: ValueKey<bool>(_titleShowHello),
-            style: GoogleFonts.ebGaramond(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-              letterSpacing: 1.2,
+          leadingWidth: leadingW,
+          title: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 350),
+            transitionBuilder: (child, anim) =>
+                FadeTransition(opacity: anim, child: child),
+            child: Text(
+              _titleShowHello ? 'Hello.' : 'AurAchieve',
+              key: ValueKey<bool>(_titleShowHello),
+              style: GoogleFonts.ebGaramond(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                letterSpacing: 1.2,
+              ),
             ),
           ),
-        ),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: Icon(
-              Icons.bar_chart_rounded,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-            tooltip: 'Stats',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => StatsPage(
-                    aura: aura,
-                    tasks: tasks.where((t) => t.status == 'pending').toList(),
-                    auraHistory: getAuraHistoryForView(),
-                    auraDates: getAuraDatesForView(),
-                    completedTasks: completedTasks,
+          centerTitle: true,
+          actions: [
+            IconButton(
+              icon: Icon(
+                Icons.bar_chart_rounded,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              tooltip: 'Stats',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => StatsPage(
+                      aura: aura,
+                      tasks: tasks.where((t) => t.status == 'pending').toList(),
+                      auraHistory: getAuraHistoryForView(),
+                      auraDates: getAuraDatesForView(),
+                      completedTasks: completedTasks,
+                    ),
                   ),
-                ),
-              );
-            },
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.settings_outlined,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                );
+              },
             ),
-            tooltip: 'Settings',
-            onPressed: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => SettingsScreen(
-                    showQuote: _showQuote,
-                    enabledTabs: _enabledTabs,
-                    onShowQuoteChanged: _updateShowQuote,
-                    onEnabledTabsChanged: (tabs) async {
-                      if (tabs.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Keep at least one tab besides Home enabled.',
+            IconButton(
+              icon: Icon(
+                Icons.settings_outlined,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              tooltip: 'Settings',
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => SettingsScreen(
+                      showQuote: _showQuote,
+                      enabledTabs: _enabledTabs,
+                      onShowQuoteChanged: _updateShowQuote,
+                      onEnabledTabsChanged: (tabs) async {
+                        if (tabs.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Keep at least one tab besides Home enabled.',
+                              ),
+                              behavior: SnackBarBehavior.floating,
                             ),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                        return;
-                      }
-                      await _updateEnabledTabs(tabs);
-                    },
-                    onLogout: logout,
+                          );
+                          return;
+                        }
+                        await _updateEnabledTabs(tabs);
+                      },
+                      onLogout: logout,
+                    ),
                   ),
-                ),
-              );
-              if (mounted) setState(() {});
-            },
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          if (showHeader) const SizedBox(height: 8),
-          Expanded(
-            child: IndexedStack(
-              index: _selectedIndex,
-              children: [
-                _buildDashboardView(),
-                HabitsPage(
-                  apiService: _apiService,
-                  initialHabits: _preloadedHabits,
-                ),
-                SocialMediaBlockerScreen(
-                  apiService: _apiService,
-                  onChallengeCompleted: _fetchDataFromServer,
-                ),
-                StudyPlannerScreen(
-                  onSetupStateChanged: _updateTimetableSetupState,
-                  apiService: _apiService,
-                  onTaskCompleted: _fetchDataFromServer,
-                  initialStudyPlan: _studyPlanMap,
-                  autoFetchIfMissing: false,
-                ),
-              ],
+                );
+                if (mounted) setState(() {});
+              },
             ),
-          ),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (i) {
-          HapticFeedback.selectionClick();
-          setState(() => _selectedIndex = i);
-        },
-        destinations: _currentTabKeys().map((key) {
-          switch (key) {
-            case 'home':
-              return const NavigationDestination(
-                icon: Icon(Icons.home_outlined),
-                selectedIcon: Icon(Icons.home_rounded),
-                label: 'Home',
-              );
-            case 'habits':
-              return const NavigationDestination(
-                icon: Icon(Icons.checklist_rtl_outlined),
-                selectedIcon: Icon(Icons.checklist_rtl_rounded),
-                label: 'Habits',
-              );
-            case 'blocker':
-              return const NavigationDestination(
-                icon: Icon(Icons.app_blocking_outlined),
-                selectedIcon: Icon(Icons.app_blocking_rounded),
-                label: 'Blocker',
-              );
-            case 'planner':
-              return const NavigationDestination(
-                icon: Icon(Icons.edit_calendar_outlined),
-                selectedIcon: Icon(Icons.edit_calendar_rounded),
-                label: 'Planner',
-              );
-            default:
-              return const NavigationDestination(
-                icon: Icon(Icons.circle_outlined),
-                label: '',
-              );
-          }
-        }).toList(),
-      ),
-      floatingActionButton: _selectedIndex == 0
-          ? FloatingActionButton.extended(
-              onPressed: _addTask,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Add Task'),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+          ],
+        ),
+        body: Column(
+          children: [
+            if (showHeader) const SizedBox(height: 8),
+            Expanded(
+              child: IndexedStack(
+                index: _selectedIndex,
+                children: [
+                  _buildDashboardView(),
+                  HabitsPage(
+                    apiService: _apiService,
+                    initialHabits: _preloadedHabits,
+                  ),
+                  SocialMediaBlockerScreen(
+                    apiService: _apiService,
+                    onChallengeCompleted: _fetchDataFromServer,
+                  ),
+                  StudyPlannerScreen(
+                    onSetupStateChanged: _updateTimetableSetupState,
+                    apiService: _apiService,
+                    onTaskCompleted: _fetchDataFromServer,
+                    initialStudyPlan: _studyPlanMap,
+                    autoFetchIfMissing: false,
+                  ),
+                ],
               ),
-            )
-          : null,
+            ),
+          ],
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _selectedIndex,
+          onDestinationSelected: (i) {
+            HapticFeedback.selectionClick();
+            setState(() => _selectedIndex = i);
+          },
+          destinations: _currentTabKeys().map((key) {
+            switch (key) {
+              case 'home':
+                return const NavigationDestination(
+                  icon: Icon(Icons.home_outlined),
+                  selectedIcon: Icon(Icons.home_rounded),
+                  label: 'Home',
+                );
+              case 'habits':
+                return const NavigationDestination(
+                  icon: Icon(Icons.checklist_rtl_outlined),
+                  selectedIcon: Icon(Icons.checklist_rtl_rounded),
+                  label: 'Habits',
+                );
+              case 'blocker':
+                return const NavigationDestination(
+                  icon: Icon(Icons.app_blocking_outlined),
+                  selectedIcon: Icon(Icons.app_blocking_rounded),
+                  label: 'Blocker',
+                );
+              case 'planner':
+                return const NavigationDestination(
+                  icon: Icon(Icons.edit_calendar_outlined),
+                  selectedIcon: Icon(Icons.edit_calendar_rounded),
+                  label: 'Planner',
+                );
+              default:
+                return const NavigationDestination(
+                  icon: Icon(Icons.circle_outlined),
+                  label: '',
+                );
+            }
+          }).toList(),
+        ),
+        floatingActionButton: _selectedIndex == 0
+            ? FloatingActionButton.extended(
+                onPressed: _addTask,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Add Task'),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              )
+            : null,
+      ),
     );
   }
 
