@@ -713,20 +713,7 @@ class _AllTasksScreenState extends State<AllTasksScreen>
 
     return GestureDetector(
       onTap: () {
-        if (task.taskCategory == "timed" &&
-            task.type == "good" &&
-            task.status == "pending") {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => TimerPage(
-                task: task,
-                apiService: widget.apiService,
-                onTaskCompleted: widget.onTaskCompleted,
-              ),
-            ),
-          );
-        } else if (isExpanded) {
+        if (isExpanded) {
           _toggleExpand(task.id);
         } else {
           _toggleExpand(task.id);

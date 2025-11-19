@@ -29,12 +29,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late Set<String> _tabs;
   String? _jwt;
 
+  // Timer Settings
+  bool _immersiveMode = true;
+  bool _soundVibration = true;
+
   @override
   void initState() {
     super.initState();
     _showQuote = widget.showQuote;
     _tabs = {...widget.enabledTabs};
     _loadJwt();
+    _loadTimerSettings();
+  }
+
+  Future<void> _loadTimerSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _immersiveMode = prefs.getBool('timer_immersive') ?? true;
+      _soundVibration = prefs.getBool('timer_sound_vibration') ?? true;
+    });
+  }
+
+  Future<void> _toggleTimerSetting(String key, bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
+    setState(() {
+      if (key == 'timer_immersive') _immersiveMode = value;
+      if (key == 'timer_sound_vibration') _soundVibration = value;
+    });
   }
 
   Future<void> _loadJwt() async {
@@ -192,6 +215,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     setState(() => _showQuote = v);
                     widget.onShowQuoteChanged(v);
                   },
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+          Text(
+            'Timer & Focus',
+            style: GoogleFonts.gabarito(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: cs.onSurfaceVariant,
+              letterSpacing: 0.2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            color: cs.surfaceContainerHigh,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: cs.outlineVariant.withOpacity(0.5)),
+            ),
+            child: Column(
+              children: [
+                SwitchListTile.adaptive(
+                  contentPadding: tilePadding,
+                  title: const Text('Immersive Blackout'),
+                  subtitle: const Text('Hide system UI in blackout mode'),
+                  value: _immersiveMode,
+                  onChanged: (v) => _toggleTimerSetting('timer_immersive', v),
+                ),
+                SwitchListTile.adaptive(
+                  contentPadding: tilePadding,
+                  title: const Text('Sound & Vibration'),
+                  subtitle: const Text('Play sound and vibrate on finish'),
+                  value: _soundVibration,
+                  onChanged: (v) =>
+                      _toggleTimerSetting('timer_sound_vibration', v),
                 ),
               ],
             ),

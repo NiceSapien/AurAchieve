@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:timezone/timezone.dart' as tz;
-import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/data/latest.dart' as tzdata;
 
 import '../api_service.dart';
 
@@ -32,11 +33,33 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
   @override
   void initState() {
     super.initState();
-    tz.initializeTimeZones();
+    tzdata.initializeTimeZones();
   }
 
   Future<bool> _requestPermissions() async {
-    return true;
+    final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+    final androidImplementation = flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+
+    final bool? androidResult = await androidImplementation
+        ?.requestNotificationsPermission();
+    await androidImplementation?.requestExactAlarmsPermission();
+
+    final iosImplementation = flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+        >();
+
+    final bool? iosResult = await iosImplementation?.requestPermissions(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    return (androidResult ?? false) || (iosResult ?? false);
   }
 
   tz.TZDateTime _nextInstanceOf(int day, TimeOfDay time) {
@@ -58,27 +81,36 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
     return scheduledDate;
   }
 
-  Future<void> _scheduleNotification() async {
+  Future<void> _scheduleNotification(String habitId, String habitName) async {
+    final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
     final bool anyDaySelected = _selectedDays.any((d) => d);
+
+    const AndroidNotificationDetails androidNotificationDetails =
+        AndroidNotificationDetails(
+          'habit_reminders',
+          'Habit Reminders',
+          channelDescription: 'Reminders for your habits',
+          importance: Importance.max,
+          priority: Priority.high,
+        );
+    const NotificationDetails notificationDetails = NotificationDetails(
+      android: androidNotificationDetails,
+    );
 
     if (anyDaySelected) {
       for (int i = 0; i < _selectedDays.length; i++) {
         if (_selectedDays[i]) {
           final day = i + 1;
+          await flutterLocalNotificationsPlugin.zonedSchedule(
+            habitId.hashCode + i,
+            'Time to $habitName',
+            'Don\'t break the chain!',
+            _nextInstanceOf(day, _selectedTime!),
+            notificationDetails,
+            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+            matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+          );
         }
-      }
-    } else {
-      final now = tz.TZDateTime.now(tz.local);
-      tz.TZDateTime scheduledDate = tz.TZDateTime(
-        tz.local,
-        now.year,
-        now.month,
-        now.day,
-        _selectedTime!.hour,
-        _selectedTime!.minute,
-      );
-      if (scheduledDate.isBefore(now)) {
-        scheduledDate = scheduledDate.add(const Duration(days: 1));
       }
     }
   }
@@ -105,6 +137,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
           if (_selectedDays[i]) selected.add('${days[i]} $timeStr');
         }
         await widget.apiService.saveHabitReminderLocal(habitId, selected);
+        await _scheduleNotification(habitId, widget.habitName);
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

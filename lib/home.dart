@@ -428,10 +428,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   void _addTask() async {
     final taskNameController = TextEditingController();
-    final hoursController = TextEditingController();
-    final minutesController = TextEditingController();
-    String selectedTaskCategory = 'normal';
-
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
@@ -439,9 +435,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       builder: (context) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter modalSetState) {
-            String? hourError;
-            String? minuteError;
-
             return SafeArea(
               child: Padding(
                 padding: EdgeInsets.only(
@@ -464,30 +457,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         ),
                       ),
                       const SizedBox(height: 20),
-                      Text(
-                        'Task Category:',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      RadioListTile<String>(
-                        title: const Text('Normal Task'),
-                        value: 'normal',
-                        groupValue: selectedTaskCategory,
-                        onChanged: (value) =>
-                            modalSetState(() => selectedTaskCategory = value!),
-                        activeColor: Theme.of(context).colorScheme.primary,
-                      ),
-                      RadioListTile<String>(
-                        title: const Text('Timed Task'),
-                        value: 'timed',
-                        groupValue: selectedTaskCategory,
-                        onChanged: (value) =>
-                            modalSetState(() => selectedTaskCategory = value!),
-                        activeColor: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(height: 12),
                       TextField(
                         controller: taskNameController,
                         autofocus: true,
@@ -512,69 +481,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           ),
                         ),
                       ),
-                      if (selectedTaskCategory == 'timed') ...[
-                        const SizedBox(height: 12),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: hoursController,
-                                style: TextStyle(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurface,
-                                ),
-                                decoration: InputDecoration(
-                                  hintText: 'Upto 4 hours',
-                                  labelText: 'Hours',
-                                  errorText: hourError,
-                                  labelStyle: TextStyle(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                  ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                                keyboardType: TextInputType.number,
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.digitsOnly,
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: TextField(
-                                controller: minutesController,
-                                style: TextStyle(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurface,
-                                ),
-                                decoration: InputDecoration(
-                                  hintText: 'Upto 59 minutes',
-                                  labelText: 'Minutes',
-                                  errorText: minuteError,
-                                  labelStyle: TextStyle(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                  ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                                keyboardType: TextInputType.number,
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.digitsOnly,
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
                       const SizedBox(height: 20),
                       Row(
                         children: [
@@ -588,55 +494,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           Expanded(
                             child: FilledButton(
                               onPressed: () {
-                                modalSetState(() {
-                                  hourError = 'Max 4 hours';
-                                  minuteError = 'Max 59 mins';
-                                });
-
                                 final name = taskNameController.text.trim();
                                 if (name.isEmpty) return;
-
                                 Map<String, dynamic> data = {
                                   'name': name,
-                                  'category': selectedTaskCategory,
+                                  'category': 'normal',
                                 };
-
-                                if (selectedTaskCategory == 'timed') {
-                                  final hours =
-                                      int.tryParse(
-                                        hoursController.text.trim(),
-                                      ) ??
-                                      0;
-                                  final minutes =
-                                      int.tryParse(
-                                        minutesController.text.trim(),
-                                      ) ??
-                                      0;
-
-                                  bool hasError = false;
-                                  if (hours < 0 || hours > 4) {
-                                    modalSetState(() {
-                                      hourError = 'Max 4 hours';
-                                    });
-                                    hasError = true;
-                                  }
-                                  if (minutes < 0 || minutes > 59) {
-                                    modalSetState(() {
-                                      minuteError = 'Max 59 mins';
-                                    });
-                                    hasError = true;
-                                  }
-                                  if ((hours == 0 && minutes == 0) &&
-                                      !hasError) {
-                                    modalSetState(() {
-                                      minuteError = 'Duration cannot be zero';
-                                    });
-                                    hasError = true;
-                                  }
-                                  if (hasError) return;
-
-                                  data['duration'] = hours * 60 + minutes;
-                                }
                                 Navigator.pop(context, data);
                               },
                               child: const Text('Add Task'),
@@ -653,18 +516,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         );
       },
     );
-
     if (result != null) {
       final String name = result['name'];
-      final String category = result['category'];
-      final int? duration = result['duration'];
-
       try {
         setState(() => isLoading = true);
-        final newTaskData = await _apiService.createTask(
+        await _apiService.createTask(
           name: name,
-          taskCategory: category,
-          durationMinutes: duration,
+          taskCategory: 'normal',
+          durationMinutes: null,
         );
         await _fetchDataFromServer();
       } catch (e) {
@@ -1013,7 +872,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   List<String> _currentTabKeys() {
-    final keys = <String>['home'];
+    final keys = <String>['home', 'timer'];
     if (_enabledTabs.contains('habits')) keys.add('habits');
     if (_enabledTabs.contains('blocker')) keys.add('blocker');
     if (_enabledTabs.contains('planner')) keys.add('planner');
@@ -1102,7 +961,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final selectedKey = keys[_selectedIndex];
     final showHeader =
         !(selectedKey == 'planner' && _isTimetableSetupInProgress);
-
     final chipTextStyle = GoogleFonts.gabarito(
       fontWeight: FontWeight.w600,
       color: Theme.of(context).colorScheme.onSurface,
@@ -1117,22 +975,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final labelWidth = math.max(baseWidth, currentWidth);
 
     final leadingW = labelWidth + 72;
-
-    final tabScreens = [
-      _buildDashboardView(),
-      HabitsPage(apiService: _apiService, initialHabits: _preloadedHabits),
-      SocialMediaBlockerScreen(
-        apiService: _apiService,
-        onChallengeCompleted: _fetchDataFromServer,
-      ),
-      StudyPlannerScreen(
-        onSetupStateChanged: _updateTimetableSetupState,
-        apiService: _apiService,
-        onTaskCompleted: _fetchDataFromServer,
-        initialStudyPlan: _studyPlanMap,
-        autoFetchIfMissing: false,
-      ),
-    ];
 
     return WillPopScope(
       onWillPop: () async {
@@ -1268,6 +1110,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 index: _selectedIndex,
                 children: [
                   _buildDashboardView(),
+                  const TimerPage(),
                   HabitsPage(
                     apiService: _apiService,
                     initialHabits: _preloadedHabits,
@@ -1294,13 +1137,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             HapticFeedback.selectionClick();
             setState(() => _selectedIndex = i);
           },
-          destinations: _currentTabKeys().map((key) {
+          destinations: keys.map((key) {
             switch (key) {
               case 'home':
                 return const NavigationDestination(
                   icon: Icon(Icons.home_outlined),
                   selectedIcon: Icon(Icons.home_rounded),
                   label: 'Home',
+                );
+              case 'timer':
+                return const NavigationDestination(
+                  icon: Icon(Icons.timer_outlined),
+                  selectedIcon: Icon(Icons.timer),
+                  label: 'Timer',
                 );
               case 'habits':
                 return const NavigationDestination(
@@ -1796,17 +1645,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Hero(
-                    tag: 'tasks_header_hero',
-                    child: Material(
-                      type: MaterialType.transparency,
-                      child: Text(
-                        'Your Tasks',
-                        style: GoogleFonts.gabarito(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
+                  Material(
+                    type: MaterialType.transparency,
+                    child: Text(
+                      'Your Tasks',
+                      style: GoogleFonts.gabarito(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                   ),
@@ -1971,20 +1817,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       type: MaterialType.transparency,
       child: GestureDetector(
         onTap: () {
-          if (task.taskCategory == "timed" &&
-              task.type == "good" &&
-              task.status == "pending") {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => TimerPage(
-                  task: task,
-                  apiService: _apiService,
-                  onTaskCompleted: () => _fetchDataFromServer(),
-                ),
-              ),
-            );
-          } else if (task.status == "pending") {
+          if (task.status == "pending") {
             _completeTask(originalTaskIndex);
           }
         },

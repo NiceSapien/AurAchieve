@@ -618,7 +618,9 @@ class ApiService {
         headers: headers,
       );
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
-        throw Exception('Failed to fetch tasks: ${resp.statusCode} ${resp.body}');
+        throw Exception(
+          'Failed to fetch tasks: ${resp.statusCode} ${resp.body}',
+        );
       }
       final data = await compute(_parseJson, resp.body);
       final tasks = data is List ? data : _extractList(data);
@@ -636,7 +638,9 @@ class ApiService {
       };
     }
 
-    final resp = await _authedGet('https://691ad65c0008a1107855.fra.appwrite.run');
+    final resp = await _authedGet(
+      'https://691ad65c0008a1107855.fra.appwrite.run',
+    );
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       if (resp.statusCode == 404) {
         return {
