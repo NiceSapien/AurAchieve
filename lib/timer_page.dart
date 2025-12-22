@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -31,7 +33,7 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
   bool _isPaused = false;
 
   int _elapsedMs = 0;
-  List<int> _laps = [];
+  final List<int> _laps = [];
 
   int _timerTargetMs = 25 * 60 * 1000;
 
@@ -93,6 +95,18 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  bool get _isTimerFinished =>
+      _mode == TimerKind.timer &&
+      _elapsedMs >= _timerTargetMs &&
+      _timerTargetMs > 0;
+
+  void _restart() {
+    setState(() {
+      _elapsedMs = 0;
+      _start();
+    });
+  }
+
   void _start() {
     if (_isRunning && !_isPaused) return;
     setState(() {
@@ -128,7 +142,7 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
         final next = _elapsedMs + deltaMs;
         if (next >= _timerTargetMs) {
           _elapsedMs = _timerTargetMs;
-          _stop();
+          _handleTimerComplete();
         } else {
           _elapsedMs = next;
         }
@@ -148,6 +162,54 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
       _tickNotifier.value++;
     }
     if (mounted) setState(() {});
+  }
+
+  void _handleTimerComplete() {
+    _stop();
+    if (_soundVibration) {
+      HapticFeedback.vibrate();
+      SystemSound.play(SystemSoundType.click);
+    }
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.timer_off_rounded,
+                  size: 32,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                "Time's Up!",
+                style: GoogleFonts.gabarito(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Dismiss'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _stop() {
@@ -370,6 +432,10 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                       fontWeight: FontWeight.w900,
                       color: Colors.white,
                       letterSpacing: 1.2,
+                    ).copyWith(
+                      fontFeatures: [
+                        const FontFeature.tabularFigures(),
+                      ],
                     ),
                   ),
                 );
@@ -440,9 +506,9 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
   Future<void> _openModeSheet() async {
     final theme = Theme.of(context);
     TimerKind selected = _mode;
-    final timerCtrl = TextEditingController(
-      text: (_timerTargetMs ~/ 60000).toString(),
-    );
+    
+    Duration timerDuration = Duration(milliseconds: _timerTargetMs);
+
     final workCtrl = TextEditingController(
       text: (_pomoWorkMs ~/ 60000).toString(),
     );
@@ -496,7 +562,7 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 24),
                           child: Text(
-                            'Timer Mode',
+                            'Select Mode',
                             style: GoogleFonts.gabarito(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
@@ -591,28 +657,9 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                                         ),
                                       ),
                                       const SizedBox(height: 12),
-                                      TextField(
-                                        controller: timerCtrl,
-                                        keyboardType: TextInputType.number,
-                                        inputFormatters: [
-                                          FilteringTextInputFormatter
-                                              .digitsOnly,
-                                        ],
-                                        style: TextStyle(color: onSurface),
-                                        decoration: InputDecoration(
-                                          labelText: 'Minutes',
-                                          filled: true,
-                                          fillColor: theme
-                                              .colorScheme
-                                              .surfaceContainerHighest
-                                              .withOpacity(0.3),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                          ),
-                                          suffixText: 'min',
-                                        ),
+                                      _MaterialTimePicker(
+                                        initialDuration: timerDuration,
+                                        onDurationChanged: (d) => timerDuration = d,
                                       ),
                                     ],
                                   ),
@@ -859,10 +906,9 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                                 child: FilledButton(
                                   onPressed: () {
                                     if (selected == TimerKind.timer) {
-                                      final m = int.tryParse(timerCtrl.text);
-                                      if (m == null || m <= 0 || m > 720) {
+                                      if (timerDuration.inSeconds == 0) {
                                         setStateSheet(
-                                          () => error = 'Enter 1–720 minutes',
+                                          () => error = 'Please enter a valid duration',
                                         );
                                         return;
                                       }
@@ -890,8 +936,7 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                                     setState(() {
                                       _mode = selected;
                                       if (selected == TimerKind.timer) {
-                                        final m = int.parse(timerCtrl.text);
-                                        _timerTargetMs = m * 60 * 1000;
+                                        _timerTargetMs = timerDuration.inMilliseconds;
                                         _elapsedMs = 0;
                                       } else if (selected ==
                                           TimerKind.pomodoro) {
@@ -986,15 +1031,17 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                         isCompleted = true;
                       } else if (cycleIndex == _pomoCurrentCycle) {
                         if (isWork) {
-                          if (_pomoIsWork)
+                          if (_pomoIsWork) {
                             isCurrent = true;
-                          else
+                          } else {
                             isCompleted = true;
+                          }
                         } else {
-                          if (!_pomoIsWork)
+                          if (!_pomoIsWork) {
                             isCurrent = true;
-                          else
+                          } else {
                             isCompleted = false;
+                          }
                         }
                       }
 
@@ -1300,6 +1347,10 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                               fontWeight: FontWeight.w500,
                               color: theme.colorScheme.onSurface,
                               letterSpacing: -1.0,
+                            ).copyWith(
+                              fontFeatures: [
+                                const FontFeature.tabularFigures(),
+                              ],
                             ),
                             textAlign: TextAlign.center,
                           ),
@@ -1341,9 +1392,19 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                         width: 96,
                         height: 96,
                         child: GestureDetector(
-                          onTap: (!_isRunning || _isPaused)
-                              ? (_isRunning ? _resume : _start)
-                              : _pause,
+                          onTap: () {
+                            if (_isTimerFinished) {
+                              _restart();
+                            } else if (!_isRunning || _isPaused) {
+                              if (_isRunning) {
+                                _resume();
+                              } else {
+                                _start();
+                              }
+                            } else {
+                              _pause();
+                            }
+                          },
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 400),
                             curve: Curves.easeOutBack,
@@ -1375,10 +1436,16 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                                   );
                                 },
                                 child: Icon(
-                                  (!_isRunning || _isPaused)
-                                      ? Icons.play_arrow_rounded
-                                      : Icons.pause_rounded,
-                                  key: ValueKey(!_isRunning || _isPaused),
+                                  _isTimerFinished
+                                      ? Icons.replay_rounded
+                                      : ((!_isRunning || _isPaused)
+                                          ? Icons.play_arrow_rounded
+                                          : Icons.pause_rounded),
+                                  key: ValueKey(
+                                    _isTimerFinished
+                                        ? 'replay'
+                                        : (!_isRunning || _isPaused),
+                                  ),
                                   size: 48,
                                   color: onActiveColor,
                                 ),
@@ -1391,7 +1458,10 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                       AnimatedSize(
                         duration: const Duration(milliseconds: 300),
                         curve: Curves.easeOutQuint,
-                        child: (_mode == TimerKind.stopwatch && _isRunning && !_isPaused)
+                        child:
+                            (_mode == TimerKind.stopwatch &&
+                                _isRunning &&
+                                !_isPaused)
                             ? Padding(
                                 padding: const EdgeInsets.only(left: 24),
                                 child: FilledButton.tonal(
@@ -1401,7 +1471,10 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                                     shape: const CircleBorder(),
                                     padding: EdgeInsets.zero,
                                   ),
-                                  child: const Icon(Icons.flag_rounded, size: 32),
+                                  child: const Icon(
+                                    Icons.flag_rounded,
+                                    size: 32,
+                                  ),
                                 ),
                               )
                             : const SizedBox.shrink(),
@@ -1417,7 +1490,9 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                         color: theme.colorScheme.surfaceContainerLow,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: theme.colorScheme.outlineVariant.withOpacity(0.5),
+                          color: theme.colorScheme.outlineVariant.withOpacity(
+                            0.5,
+                          ),
                         ),
                       ),
                       child: ListView.separated(
@@ -1427,7 +1502,9 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                           height: 1,
                           indent: 16,
                           endIndent: 16,
-                          color: theme.colorScheme.outlineVariant.withOpacity(0.2),
+                          color: theme.colorScheme.outlineVariant.withOpacity(
+                            0.2,
+                          ),
                         ),
                         itemBuilder: (context, index) {
                           final lapTime = _laps[index];
@@ -1579,5 +1656,150 @@ class _RingPainter extends CustomPainter {
         oldDelegate.color != color ||
         oldDelegate.thickness != thickness ||
         oldDelegate.rounded != rounded;
+  }
+}
+
+class _MaterialTimePicker extends StatefulWidget {
+  final Duration initialDuration;
+  final ValueChanged<Duration> onDurationChanged;
+
+  const _MaterialTimePicker({
+    required this.initialDuration,
+    required this.onDurationChanged,
+  });
+
+  @override
+  State<_MaterialTimePicker> createState() => _MaterialTimePickerState();
+}
+
+class _MaterialTimePickerState extends State<_MaterialTimePicker> {
+  late TextEditingController _hCtrl;
+  late TextEditingController _mCtrl;
+  late TextEditingController _sCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final h = widget.initialDuration.inHours;
+    final m = widget.initialDuration.inMinutes % 60;
+    final s = widget.initialDuration.inSeconds % 60;
+    _hCtrl = TextEditingController(text: h.toString().padLeft(2, '0'));
+    _mCtrl = TextEditingController(text: m.toString().padLeft(2, '0'));
+    _sCtrl = TextEditingController(text: s.toString().padLeft(2, '0'));
+
+    _hCtrl.addListener(_notify);
+    _mCtrl.addListener(_notify);
+    _sCtrl.addListener(_notify);
+  }
+
+  @override
+  void dispose() {
+    _hCtrl.dispose();
+    _mCtrl.dispose();
+    _sCtrl.dispose();
+    super.dispose();
+  }
+
+  void _notify() {
+    final h = int.tryParse(_hCtrl.text) ?? 0;
+    final m = int.tryParse(_mCtrl.text) ?? 0;
+    final s = int.tryParse(_sCtrl.text) ?? 0;
+    widget.onDurationChanged(Duration(hours: h, minutes: m, seconds: s));
+  }
+
+  Widget _buildField(
+    BuildContext context,
+    TextEditingController ctrl,
+    String label,
+    int max,
+  ) {
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        Container(
+          width: 72,
+          height: 80,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          alignment: Alignment.center,
+          child: TextField(
+            controller: ctrl,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.gabarito(
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.onSurface,
+            ),
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.zero,
+              isDense: true,
+            ),
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(2),
+            ],
+            onTap: () {
+              ctrl.selection = TextSelection(
+                baseOffset: 0,
+                extentOffset: ctrl.text.length,
+              );
+            },
+            onChanged: (val) {
+              if (val.length == 2) {
+                FocusScope.of(context).nextFocus();
+              }
+            },
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _buildField(context, _hCtrl, 'HOURS', 23),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 32),
+          child: Text(
+            ':',
+            style: GoogleFonts.gabarito(
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
+            ),
+          ),
+        ),
+        _buildField(context, _mCtrl, 'MINUTES', 59),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 32),
+          child: Text(
+            ':',
+            style: GoogleFonts.gabarito(
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
+            ),
+          ),
+        ),
+        _buildField(context, _sCtrl, 'SECONDS', 59),
+      ],
+    );
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
@@ -33,7 +34,45 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
   @override
   void initState() {
     super.initState();
+    _configureLocalTimeZone();
+  }
+
+  Future<void> _configureLocalTimeZone() async {
     tzdata.initializeTimeZones();
+    try {
+      final dynamic localTimezone = await FlutterTimezone.getLocalTimezone();
+      String timeZoneName = localTimezone.toString();
+      debugPrint('Raw timezone string: $timeZoneName');
+
+      // Try to find a valid timezone ID using regex (e.g., "Asia/Kolkata", "America/New_York")
+      final RegExp regex = RegExp(r'([A-Za-z]+/[A-Za-z_]+)');
+      final match = regex.firstMatch(timeZoneName);
+
+      if (match != null) {
+        timeZoneName = match.group(1)!;
+      } else {
+        // Fallback for simple IDs or if regex fails but string is valid
+        if (timeZoneName.startsWith('TimezoneInfo(')) {
+          final split = timeZoneName.split(',');
+          if (split.isNotEmpty) {
+            timeZoneName = split[0].substring('TimezoneInfo('.length);
+          }
+        }
+      }
+
+      tz.setLocalLocation(tz.getLocation(timeZoneName));
+      debugPrint('Timezone set to: $timeZoneName');
+    } catch (e) {
+      debugPrint('Could not get local timezone: $e');
+      // Fallback to a known timezone if detection fails, or UTC
+      try {
+        tz.setLocalLocation(tz.getLocation('Asia/Kolkata')); // Try a default
+        debugPrint('Fallback to Asia/Kolkata');
+      } catch (_) {
+        tz.setLocalLocation(tz.getLocation('UTC'));
+        debugPrint('Fallback to UTC');
+      }
+    }
   }
 
   Future<bool> _requestPermissions() async {
@@ -46,7 +85,11 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
 
     final bool? androidResult = await androidImplementation
         ?.requestNotificationsPermission();
-    await androidImplementation?.requestExactAlarmsPermission();
+
+    // Check exact alarm permission status
+    final exactAlarmStatus = await androidImplementation
+        ?.requestExactAlarmsPermission();
+    debugPrint('Exact Alarm Permission Status: $exactAlarmStatus');
 
     final iosImplementation = flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<
@@ -97,19 +140,59 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       android: androidNotificationDetails,
     );
 
+    // Explicitly create the channel
+    final androidImplementation = flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+    await androidImplementation?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'habit_reminders',
+        'Habit Reminders',
+        description: 'Reminders for your habits',
+        importance: Importance.max,
+      ),
+    );
+
     if (anyDaySelected) {
       for (int i = 0; i < _selectedDays.length; i++) {
         if (_selectedDays[i]) {
           final day = i + 1;
-          await flutterLocalNotificationsPlugin.zonedSchedule(
-            habitId.hashCode + i,
-            'Time to $habitName',
-            'Don\'t break the chain!',
-            _nextInstanceOf(day, _selectedTime!),
-            notificationDetails,
-            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-            matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+          final scheduledDate = _nextInstanceOf(day, _selectedTime!);
+          debugPrint('Current Timezone: ${tz.local.name}');
+          debugPrint('Now (Local): ${tz.TZDateTime.now(tz.local)}');
+          debugPrint(
+            'Scheduling notification for $habitName on day $day at $scheduledDate',
           );
+
+          if (scheduledDate.isBefore(tz.TZDateTime.now(tz.local))) {
+            debugPrint('WARNING: Scheduled date is in the past!');
+          }
+
+          try {
+            await flutterLocalNotificationsPlugin.zonedSchedule(
+              habitId.hashCode + i,
+              'Time to $habitName',
+              'Don\'t break the chain!',
+              scheduledDate,
+              notificationDetails,
+              androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+              matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+            );
+            debugPrint(
+              'Notification scheduled successfully for ID: ${habitId.hashCode + i}',
+            );
+
+            // Immediate test notification to verify system is working
+            await flutterLocalNotificationsPlugin.show(
+              99999,
+              'Test Notification',
+              'If you see this, notifications work!',
+              notificationDetails,
+            );
+          } catch (e) {
+            debugPrint('Error scheduling notification: $e');
+          }
         }
       }
     }

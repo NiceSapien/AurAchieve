@@ -21,13 +21,37 @@ import 'api_service.dart';
 Future<void> _initializeTimezone() async {
   tz_data.initializeTimeZones();
   try {
-    final localTimezone = await FlutterTimezone.getLocalTimezone();
-    tz.setLocalLocation(tz.getLocation(localTimezone.toString()));
-    print("Timezone successfully set to: $localTimezone");
+    final dynamic localTimezone = await FlutterTimezone.getLocalTimezone();
+    String timeZoneName = localTimezone.toString();
+    print('Raw timezone string: $timeZoneName');
+
+    // Try to find a valid timezone ID using regex (e.g., "Asia/Kolkata", "America/New_York")
+    final RegExp regex = RegExp(r'([A-Za-z]+/[A-Za-z_]+)');
+    final match = regex.firstMatch(timeZoneName);
+
+    if (match != null) {
+      timeZoneName = match.group(1)!;
+    } else {
+      // Handle TimezoneInfo object string representation (seen on Linux)
+      if (timeZoneName.startsWith('TimezoneInfo(')) {
+        final split = timeZoneName.split(',');
+        if (split.isNotEmpty) {
+          timeZoneName = split[0].substring('TimezoneInfo('.length);
+        }
+      }
+    }
+
+    tz.setLocalLocation(tz.getLocation(timeZoneName));
+    print("Timezone successfully set to: $timeZoneName");
   } catch (e) {
     print("Could not get local timezone: $e");
-
-    tz.setLocalLocation(tz.getLocation('UTC'));
+    try {
+      tz.setLocalLocation(tz.getLocation('Asia/Kolkata')); // Try a default
+      print('Fallback to Asia/Kolkata');
+    } catch (_) {
+      tz.setLocalLocation(tz.getLocation('UTC'));
+      print('Fallback to UTC');
+    }
   }
 }
 
@@ -40,10 +64,10 @@ Future<void> _initializeNotifications() async {
 
   const DarwinInitializationSettings initializationSettingsDarwin =
       DarwinInitializationSettings(
-    requestAlertPermission: false,
-    requestBadgePermission: false,
-    requestSoundPermission: false,
-  );
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      );
 
   const InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,

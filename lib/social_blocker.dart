@@ -718,7 +718,7 @@ class _SocialMediaBlockerScreenState extends State<SocialMediaBlockerScreen>
                     ],
                   ),
                 );
-              }).toList(),
+              }),
               _buildDurationPage(),
               _buildSecurityPage(),
               _buildPasswordPage(),

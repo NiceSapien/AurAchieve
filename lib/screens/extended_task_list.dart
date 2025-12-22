@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../home.dart';
 import '../../api_service.dart';
-import '../../timer_page.dart';
 import 'dart:math' as math;
 
 class AllTasksScreen extends StatefulWidget {
