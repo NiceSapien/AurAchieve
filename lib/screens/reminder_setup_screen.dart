@@ -93,8 +93,8 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
 
     // If permission is denied, we might need to open settings
     if (exactAlarmStatus == false) {
-       // Note: requestExactAlarmsPermission() usually opens the settings directly 
-       // or returns status. If it returns false/null, we might want to inform the user.
+      // Note: requestExactAlarmsPermission() usually opens the settings directly
+      // or returns status. If it returns false/null, we might want to inform the user.
     }
 
     final iosImplementation = flutterLocalNotificationsPlugin

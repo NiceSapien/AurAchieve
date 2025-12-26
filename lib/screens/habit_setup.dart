@@ -442,9 +442,7 @@ class _HabitSetupState extends State<HabitSetup> {
   @override
   Widget build(BuildContext context) {
     if (_checkingIntro) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     return Scaffold(
       body: SafeArea(

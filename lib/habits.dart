@@ -201,9 +201,8 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
       final list = await widget.apiService.getHabits();
       for (final habit in list) {
         if (habit is Map) {
-          final id =
-              (habit[r'$id'] ?? habit['id'] ?? habit['habitId'] ?? '')
-                  .toString();
+          final id = (habit[r'$id'] ?? habit['id'] ?? habit['habitId'] ?? '')
+              .toString();
           if (id.isNotEmpty) {
             final localReminders = await widget.apiService
                 .getHabitReminderLocal(id);
@@ -1105,8 +1104,8 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                           triggerMode: TooltipTriggerMode.tap,
                           message: streak > 0
                               ? (completedToday
-                                  ? 'Streak active! Completed today.'
-                                  : 'Streak active! Complete today to keep it.')
+                                    ? 'Streak active! Completed today.'
+                                    : 'Streak active! Complete today to keep it.')
                               : 'No active streak.',
                           child: _StatBadge(
                             value: streak,
@@ -1115,15 +1114,15 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                                 : Icons.local_fire_department_outlined,
                             backgroundColor: streak > 0
                                 ? (completedToday
-                                    ? scheme.primary
-                                    : Colors.transparent)
+                                      ? scheme.primary
+                                      : Colors.transparent)
                                 : scheme.surfaceContainerHighest.withOpacity(
-                                  0.4,
-                                ),
+                                    0.4,
+                                  ),
                             iconColor: streak > 0
                                 ? (completedToday
-                                    ? scheme.onPrimary
-                                    : scheme.primary)
+                                      ? scheme.onPrimary
+                                      : scheme.primary)
                                 : scheme.onSurfaceVariant.withOpacity(0.6),
                             borderColor: (streak > 0 && !completedToday)
                                 ? scheme.primary
