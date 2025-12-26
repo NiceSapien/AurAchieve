@@ -91,6 +91,12 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
         ?.requestExactAlarmsPermission();
     debugPrint('Exact Alarm Permission Status: $exactAlarmStatus');
 
+    // If permission is denied, we might need to open settings
+    if (exactAlarmStatus == false) {
+       // Note: requestExactAlarmsPermission() usually opens the settings directly 
+       // or returns status. If it returns false/null, we might want to inform the user.
+    }
+
     final iosImplementation = flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<
           IOSFlutterLocalNotificationsPlugin
@@ -115,11 +121,11 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       time.hour,
       time.minute,
     );
-    while (scheduledDate.weekday != day) {
+    if (scheduledDate.isBefore(now)) {
       scheduledDate = scheduledDate.add(const Duration(days: 1));
     }
-    if (scheduledDate.isBefore(now)) {
-      scheduledDate = scheduledDate.add(const Duration(days: 7));
+    while (scheduledDate.weekday != day) {
+      scheduledDate = scheduledDate.add(const Duration(days: 1));
     }
     return scheduledDate;
   }
@@ -135,6 +141,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
           channelDescription: 'Reminders for your habits',
           importance: Importance.max,
           priority: Priority.high,
+          icon: '@mipmap/launcher_icon',
         );
     const NotificationDetails notificationDetails = NotificationDetails(
       android: androidNotificationDetails,
@@ -172,8 +179,8 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
           try {
             await flutterLocalNotificationsPlugin.zonedSchedule(
               habitId.hashCode + i,
-              'Time to $habitName',
-              'Don\'t break the chain!',
+              'Time to $habitName!',
+              'Remember you want to become ${widget.habitGoal}',
               scheduledDate,
               notificationDetails,
               androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
@@ -209,7 +216,10 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
         completedDays: [],
       );
       final habitId =
-          created[r'$id'] ?? created['id'] ?? created['habitId'] ?? '';
+          created[r'$id'] ??
+          created['id'] ??
+          created['habitId'] ??
+          DateTime.now().millisecondsSinceEpoch.toString();
       final hasTime = _selectedTime != null;
       final hasDay = _selectedDays.any((d) => d);
       if (habitId.isNotEmpty && hasTime && hasDay) {

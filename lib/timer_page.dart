@@ -427,16 +427,15 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                 return Center(
                   child: Text(
                     _currentTimeText(),
-                    style: GoogleFonts.gabarito(
-                      fontSize: 56,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      letterSpacing: 1.2,
-                    ).copyWith(
-                      fontFeatures: [
-                        const FontFeature.tabularFigures(),
-                      ],
-                    ),
+                    style:
+                        GoogleFonts.gabarito(
+                          fontSize: 56,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          letterSpacing: 1.2,
+                        ).copyWith(
+                          fontFeatures: [const FontFeature.tabularFigures()],
+                        ),
                   ),
                 );
               },
@@ -506,7 +505,7 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
   Future<void> _openModeSheet() async {
     final theme = Theme.of(context);
     TimerKind selected = _mode;
-    
+
     Duration timerDuration = Duration(milliseconds: _timerTargetMs);
 
     final workCtrl = TextEditingController(
@@ -659,7 +658,8 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                                       const SizedBox(height: 12),
                                       _MaterialTimePicker(
                                         initialDuration: timerDuration,
-                                        onDurationChanged: (d) => timerDuration = d,
+                                        onDurationChanged: (d) =>
+                                            timerDuration = d,
                                       ),
                                     ],
                                   ),
@@ -908,7 +908,8 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                                     if (selected == TimerKind.timer) {
                                       if (timerDuration.inSeconds == 0) {
                                         setStateSheet(
-                                          () => error = 'Please enter a valid duration',
+                                          () => error =
+                                              'Please enter a valid duration',
                                         );
                                         return;
                                       }
@@ -936,7 +937,8 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                                     setState(() {
                                       _mode = selected;
                                       if (selected == TimerKind.timer) {
-                                        _timerTargetMs = timerDuration.inMilliseconds;
+                                        _timerTargetMs =
+                                            timerDuration.inMilliseconds;
                                         _elapsedMs = 0;
                                       } else if (selected ==
                                           TimerKind.pomodoro) {
@@ -1342,16 +1344,17 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                         Center(
                           child: Text(
                             timeText,
-                            style: GoogleFonts.gabarito(
-                              fontSize: 64,
-                              fontWeight: FontWeight.w500,
-                              color: theme.colorScheme.onSurface,
-                              letterSpacing: -1.0,
-                            ).copyWith(
-                              fontFeatures: [
-                                const FontFeature.tabularFigures(),
-                              ],
-                            ),
+                            style:
+                                GoogleFonts.gabarito(
+                                  fontSize: 64,
+                                  fontWeight: FontWeight.w500,
+                                  color: theme.colorScheme.onSurface,
+                                  letterSpacing: -1.0,
+                                ).copyWith(
+                                  fontFeatures: [
+                                    const FontFeature.tabularFigures(),
+                                  ],
+                                ),
                             textAlign: TextAlign.center,
                           ),
                         ),
@@ -1439,8 +1442,8 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
                                   _isTimerFinished
                                       ? Icons.replay_rounded
                                       : ((!_isRunning || _isPaused)
-                                          ? Icons.play_arrow_rounded
-                                          : Icons.pause_rounded),
+                                            ? Icons.play_arrow_rounded
+                                            : Icons.pause_rounded),
                                   key: ValueKey(
                                     _isTimerFinished
                                         ? 'replay'

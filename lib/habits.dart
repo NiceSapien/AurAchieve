@@ -199,6 +199,20 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     setState(() => _loading = true);
     try {
       final list = await widget.apiService.getHabits();
+      for (final habit in list) {
+        if (habit is Map) {
+          final id =
+              (habit[r'$id'] ?? habit['id'] ?? habit['habitId'] ?? '')
+                  .toString();
+          if (id.isNotEmpty) {
+            final localReminders = await widget.apiService
+                .getHabitReminderLocal(id);
+            if (localReminders != null) {
+              habit['habitReminder'] = localReminders;
+            }
+          }
+        }
+      }
       if (mounted) setState(() => _habits = _normalizeHabits(list));
     } catch (e) {
       if (mounted) {
@@ -384,10 +398,10 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         DateTime calMonth = DateTime(now.year, now.month);
         return DraggableScrollableSheet(
           expand: false,
-          initialChildSize: 0.58,
+          initialChildSize: 0.85,
           minChildSize: 0.40,
           maxChildSize: 0.94,
-          builder: (context, scrollController) => SafeArea(
+          builder: (sheetContext, scrollController) => SafeArea(
             top: false,
             child: SingleChildScrollView(
               controller: scrollController,
@@ -1087,18 +1101,35 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                     const SizedBox(width: 16),
                     Row(
                       children: [
-                        _StatBadge(
-                          value: streak,
-                          icon: Icons.local_fire_department_outlined,
-                          color: scheme.primary,
-                          textColor: colorPair.fg,
-                        ),
-                        const SizedBox(width: 12),
-                        _StatBadge(
-                          value: totalCompletions,
-                          icon: Icons.done_all_outlined,
-                          color: scheme.tertiary,
-                          textColor: colorPair.fg,
+                        Tooltip(
+                          triggerMode: TooltipTriggerMode.tap,
+                          message: streak > 0
+                              ? (completedToday
+                                  ? 'Streak active! Completed today.'
+                                  : 'Streak active! Complete today to keep it.')
+                              : 'No active streak.',
+                          child: _StatBadge(
+                            value: streak,
+                            icon: streak > 0
+                                ? Icons.local_fire_department_rounded
+                                : Icons.local_fire_department_outlined,
+                            backgroundColor: streak > 0
+                                ? (completedToday
+                                    ? scheme.primary
+                                    : Colors.transparent)
+                                : scheme.surfaceContainerHighest.withOpacity(
+                                  0.4,
+                                ),
+                            iconColor: streak > 0
+                                ? (completedToday
+                                    ? scheme.onPrimary
+                                    : scheme.primary)
+                                : scheme.onSurfaceVariant.withOpacity(0.6),
+                            borderColor: (streak > 0 && !completedToday)
+                                ? scheme.primary
+                                : null,
+                            textColor: colorPair.fg,
+                          ),
                         ),
                       ],
                     ),
@@ -1183,29 +1214,35 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
 class _StatBadge extends StatelessWidget {
   final int value;
   final IconData icon;
-  final Color color;
+  final Color backgroundColor;
+  final Color iconColor;
+  final Color? borderColor;
   final Color textColor;
 
   const _StatBadge({
     required this.value,
     required this.icon,
-    required this.color,
+    required this.backgroundColor,
+    required this.iconColor,
+    this.borderColor,
     required this.textColor,
   });
 
   @override
   Widget build(BuildContext context) {
-    final iconColor =
-        ThemeData.estimateBrightnessForColor(color) == Brightness.dark
-        ? Colors.white
-        : Colors.black;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Container(
           width: 38,
           height: 38,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            shape: BoxShape.circle,
+            border: borderColor != null
+                ? Border.all(color: borderColor!, width: 2)
+                : null,
+          ),
           child: Icon(icon, size: 22, color: iconColor),
         ),
         const SizedBox(height: 6),

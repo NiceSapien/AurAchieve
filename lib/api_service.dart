@@ -49,23 +49,53 @@ class ApiService {
     return await _storage.read(key: 'jwt_token');
   }
 
-  Future<http.Response> _authedGet(String url, {int retryCount = 0}) async {
-    String? token = await getJwtToken();
-    final headers = {
-      'Authorization': token != null ? 'Bearer $token' : '',
-      'Content-Type': 'application/json',
-    };
-    final resp = await http.get(Uri.parse(url), headers: headers);
+  Future<http.Response> _performRequest(
+    String method,
+    String endpoint, {
+    Object? body,
+    int retryCount = 0,
+    String? overrideUrl,
+  }) async {
+    final url = overrideUrl != null
+        ? Uri.parse(overrideUrl)
+        : Uri.parse('${AppConfig.baseUrl}$endpoint');
+    final headers = await _getHeaders();
 
-    if (resp.statusCode == 401 && retryCount == 0) {
-      token = await getJwtToken(forceRefresh: true);
-      final newHeaders = {
-        'Authorization': token != null ? 'Bearer $token' : '',
-        'Content-Type': 'application/json',
-      };
-      return await http.get(Uri.parse(url), headers: newHeaders);
+    http.Response response;
+    switch (method) {
+      case 'GET':
+        response = await http.get(url, headers: headers);
+        break;
+      case 'POST':
+        response = await http.post(url, headers: headers, body: body);
+        break;
+      case 'PUT':
+        response = await http.put(url, headers: headers, body: body);
+        break;
+      case 'DELETE':
+        response = await http.delete(url, headers: headers, body: body);
+        break;
+      case 'PATCH':
+        response = await http.patch(url, headers: headers, body: body);
+        break;
+      default:
+        throw Exception('Unsupported method: $method');
     }
-    return resp;
+
+    if ((response.statusCode == 401 ||
+            response.body.contains("Invalid or Expired token")) &&
+        retryCount == 0) {
+      await getJwtToken(forceRefresh: true);
+      return _performRequest(
+        method,
+        endpoint,
+        body: body,
+        retryCount: retryCount + 1,
+        overrideUrl: overrideUrl,
+      );
+    }
+
+    return response;
   }
 
   List<dynamic> _asList(dynamic v) {
@@ -113,11 +143,7 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> getUserProfile() async {
-    final headers = await _getHeaders();
-    final response = await http.get(
-      Uri.parse('${AppConfig.baseUrl}/api/user/profile'),
-      headers: headers,
-    );
+    final response = await _performRequest('GET', '/api/user/profile');
 
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
@@ -130,11 +156,7 @@ class ApiService {
   }
 
   Future<List<dynamic>> getTasks() async {
-    final headers = await _getHeaders();
-    final response = await http.get(
-      Uri.parse('${AppConfig.baseUrl}/api/tasks'),
-      headers: headers,
-    );
+    final response = await _performRequest('GET', '/api/tasks');
     if (response.statusCode == 200) {
       return (await compute(_parseJson, response.body)) as List<dynamic>;
     } else {
@@ -150,10 +172,9 @@ class ApiService {
     int? durationMinutes,
     bool isImageVerifiable = false,
   }) async {
-    final headers = await _getHeaders();
-    final response = await http.post(
-      Uri.parse('${AppConfig.baseUrl}/api/tasks'),
-      headers: headers,
+    final response = await _performRequest(
+      'POST',
+      '/api/tasks',
       body: jsonEncode({
         'name': name,
         'intensity': intensity,
@@ -171,11 +192,7 @@ class ApiService {
   }
 
   Future<void> deleteTask(String taskId) async {
-    final headers = await _getHeaders();
-    final response = await http.delete(
-      Uri.parse('${AppConfig.baseUrl}/api/tasks/$taskId'),
-      headers: headers,
-    );
+    final response = await _performRequest('DELETE', '/api/tasks/$taskId');
     if (response.statusCode != 200 && response.statusCode != 204) {
       throw Exception('Failed to delete task: ${response.body}');
     }
@@ -184,12 +201,9 @@ class ApiService {
   Future<Map<String, dynamic>> completeNormalNonVerifiableTask(
     String taskId,
   ) async {
-    final headers = await _getHeaders();
-    final response = await http.post(
-      Uri.parse(
-        '${AppConfig.baseUrl}/api/tasks/$taskId/complete-normal-non-verifiable',
-      ),
-      headers: headers,
+    final response = await _performRequest(
+      'POST',
+      '/api/tasks/$taskId/complete-normal-non-verifiable',
       body: jsonEncode({'verificationType': 'honor'}),
     );
     if (response.statusCode == 200) {
@@ -205,10 +219,9 @@ class ApiService {
     String taskId,
     String imageBase64,
   ) async {
-    final headers = await _getHeaders();
-    final response = await http.post(
-      Uri.parse('${AppConfig.baseUrl}/api/tasks/$taskId/complete'),
-      headers: headers,
+    final response = await _performRequest(
+      'POST',
+      '/api/tasks/$taskId/complete',
       body: jsonEncode({
         'verificationType': 'image',
         'imageBase64': imageBase64,
@@ -224,10 +237,9 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> completeBadTask(String taskId) async {
-    final headers = await _getHeaders();
-    final response = await http.post(
-      Uri.parse('${AppConfig.baseUrl}/api/tasks/$taskId/complete-bad'),
-      headers: headers,
+    final response = await _performRequest(
+      'POST',
+      '/api/tasks/$taskId/complete-bad',
       body: jsonEncode({'verificationType': 'bad_task_completion'}),
     );
     if (response.statusCode == 200) {
@@ -241,16 +253,14 @@ class ApiService {
     String taskId, {
     int? durationSpentMinutes,
   }) async {
-    final headers = await _getHeaders();
-
     final body = <String, dynamic>{'verificationType': 'timed_completion'};
     if (durationSpentMinutes != null) {
       body['durationSpentMinutes'] = durationSpentMinutes;
     }
 
-    final response = await http.post(
-      Uri.parse('${AppConfig.baseUrl}/api/tasks/$taskId/complete-timed'),
-      headers: headers,
+    final response = await _performRequest(
+      'POST',
+      '/api/tasks/$taskId/complete-timed',
       body: jsonEncode(body),
     );
     if (response.statusCode == 200) {
@@ -261,10 +271,9 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> markTaskAsBad(String taskId) async {
-    final headers = await _getHeaders();
-    final response = await http.put(
-      Uri.parse('${AppConfig.baseUrl}/api/tasks/$taskId/mark-bad'),
-      headers: headers,
+    final response = await _performRequest(
+      'PUT',
+      '/api/tasks/$taskId/mark-bad',
     );
     if (response.statusCode == 200) {
       return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
@@ -274,11 +283,7 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>?> getSocialBlockerData() async {
-    final headers = await _getHeaders();
-    final response = await http.get(
-      Uri.parse('${AppConfig.baseUrl}/api/social-blocker/get'),
-      headers: headers,
-    );
+    final response = await _performRequest('GET', '/api/social-blocker/get');
     if (response.statusCode == 200) {
       final data = await compute(_parseJson, response.body);
       if (data is Map<String, dynamic> && data.isNotEmpty) {
@@ -296,11 +301,10 @@ class ApiService {
     required int socialEndDays,
     required String socialPassword,
   }) async {
-    final headers = await _getHeaders();
     final user = await account.get();
-    final response = await http.post(
-      Uri.parse('${AppConfig.baseUrl}/api/social-blocker'),
-      headers: headers,
+    final response = await _performRequest(
+      'POST',
+      '/api/social-blocker',
       body: jsonEncode({
         'userId': user.$id,
         'socialEnd': socialEndDays,
@@ -313,11 +317,10 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> completeSocialBlocker() async {
-    final headers = await _getHeaders();
     final user = await account.get();
-    final response = await http.post(
-      Uri.parse('${AppConfig.baseUrl}/api/social-blocker/end'),
-      headers: headers,
+    final response = await _performRequest(
+      'POST',
+      '/api/social-blocker/end',
       body: jsonEncode({
         'hasEnded': true,
         'userId': user.$id,
@@ -332,10 +335,9 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> giveUpSocialBlocker() async {
-    final headers = await _getHeaders();
-    final response = await http.delete(
-      Uri.parse('${AppConfig.baseUrl}/api/social-blocker/giveup'),
-      headers: headers,
+    final response = await _performRequest(
+      'DELETE',
+      '/api/social-blocker/giveup',
     );
     if (response.statusCode == 200) {
       return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
@@ -345,11 +347,10 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>?> getStudyPlan() async {
-    final headers = await _getHeaders();
     final clientDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final response = await http.get(
-      Uri.parse('${AppConfig.baseUrl}/api/study-plan?clientDate=$clientDate'),
-      headers: headers,
+    final response = await _performRequest(
+      'GET',
+      '/api/study-plan?clientDate=$clientDate',
     );
 
     if (response.statusCode == 200) {
@@ -374,7 +375,6 @@ class ApiService {
     required Map<String, List<Map<String, String>>> chapters,
     required DateTime deadline,
   }) async {
-    final headers = await _getHeaders();
     final clientDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     final body = {
@@ -383,9 +383,9 @@ class ApiService {
       'clientDate': clientDate,
     };
 
-    final response = await http.post(
-      Uri.parse('${AppConfig.baseUrl}/api/study-plan/generate'),
-      headers: headers,
+    final response = await _performRequest(
+      'POST',
+      '/api/study-plan/generate',
       body: jsonEncode(body),
     );
 
@@ -402,8 +402,6 @@ class ApiService {
     required DateTime deadline,
     required List<Map<String, dynamic>> timetable,
   }) async {
-    final headers = await _getHeaders();
-
     final body = {
       'subjects': subjects,
       'chapters': chapters,
@@ -411,9 +409,9 @@ class ApiService {
       'timetable': timetable,
     };
 
-    final response = await http.post(
-      Uri.parse('${AppConfig.baseUrl}/api/study-plan'),
-      headers: headers,
+    final response = await _performRequest(
+      'POST',
+      '/api/study-plan',
       body: jsonEncode(body),
     );
 
@@ -428,11 +426,10 @@ class ApiService {
     String taskId,
     String dateOfTask,
   ) async {
-    final headers = await _getHeaders();
     final clientDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final response = await http.post(
-      Uri.parse('${AppConfig.baseUrl}/api/study-plan/tasks/$taskId/complete'),
-      headers: headers,
+    final response = await _performRequest(
+      'POST',
+      '/api/study-plan/tasks/$taskId/complete',
       body: jsonEncode({'clientDate': clientDate, 'dateOfTask': dateOfTask}),
     );
     if (response.statusCode == 200) {
@@ -443,11 +440,7 @@ class ApiService {
   }
 
   Future<void> deleteStudyPlan() async {
-    final headers = await _getHeaders();
-    final response = await http.delete(
-      Uri.parse('${AppConfig.baseUrl}/api/study-plan'),
-      headers: headers,
-    );
+    final response = await _performRequest('DELETE', '/api/study-plan');
     if (response.statusCode != 204) {
       throw Exception('Failed to delete study plan: ${response.body}');
     }
@@ -460,11 +453,10 @@ class ApiService {
     DateTime? createdAt,
     List<String>? completedDays,
   }) async {
-    final headers = await _getHeaders();
     final cdJson = jsonEncode(completedDays ?? <String>[]);
-    final response = await http.post(
-      Uri.parse('${AppConfig.baseUrl}/api/habit'),
-      headers: headers,
+    final response = await _performRequest(
+      'POST',
+      '/api/habit',
       body: jsonEncode({
         'habitName': habitName,
         'habitGoal': habitGoal,
@@ -480,11 +472,7 @@ class ApiService {
   }
 
   Future<List<dynamic>> getHabits() async {
-    final headers = await _getHeaders();
-    final res = await http.get(
-      Uri.parse('${AppConfig.baseUrl}/api/habit'),
-      headers: headers,
-    );
+    final res = await _performRequest('GET', '/api/habit');
     if (res.statusCode != 200) {
       throw Exception('Failed to load habits: ${res.body}');
     }
@@ -533,11 +521,10 @@ class ApiService {
     String habitId, {
     required List<String> completedDays,
   }) async {
-    final headers = await _getHeaders();
     final cdJson = jsonEncode(completedDays);
-    final response = await http.put(
-      Uri.parse('${AppConfig.baseUrl}/api/habit'),
-      headers: headers,
+    final response = await _performRequest(
+      'PUT',
+      '/api/habit',
       body: jsonEncode({
         'habitId': habitId,
         'completedDays': cdJson,
@@ -599,10 +586,9 @@ class ApiService {
   }
 
   Future<void> deleteHabit(String habitId) async {
-    final headers = await _getHeaders();
-    final res = await http.delete(
-      Uri.parse('${AppConfig.baseUrl}/api/habit'),
-      headers: headers,
+    final res = await _performRequest(
+      'DELETE',
+      '/api/habit',
       body: jsonEncode({'habitId': habitId}),
     );
     if (res.statusCode != 200 && res.statusCode != 204) {
@@ -612,11 +598,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getTasksAndHabits() async {
     if (AppConfig.baseUrl != AppConfig.defaultBaseUrl) {
-      final headers = await _getHeaders();
-      final resp = await http.get(
-        Uri.parse('${AppConfig.baseUrl}/api/tasks'),
-        headers: headers,
-      );
+      final resp = await _performRequest('GET', '/api/tasks');
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
         throw Exception(
           'Failed to fetch tasks: ${resp.statusCode} ${resp.body}',
@@ -638,8 +620,10 @@ class ApiService {
       };
     }
 
-    final resp = await _authedGet(
-      'https://691ad65c0008a1107855.fra.appwrite.run',
+    final resp = await _performRequest(
+      'GET',
+      '',
+      overrideUrl: 'https://691ad65c0008a1107855.fra.appwrite.run',
     );
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       if (resp.statusCode == 404) {
@@ -715,12 +699,11 @@ class ApiService {
     return [];
   }
 
-  Future<void> createProfile(Map<String, dynamic> profileData) async {
-    final headers = await _getHeaders();
-    final resp = await http.post(
-      Uri.parse('${AppConfig.baseUrl}/api/profile'),
-      headers: headers,
-      body: jsonEncode(profileData),
+  Future<void> createProfile(String name, String email) async {
+    final resp = await _performRequest(
+      'POST',
+      '/api/users',
+      body: {'name': name, 'email': email},
     );
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw Exception(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../api_service.dart';
 import 'package:auraascend/screens/reminder_setup_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HabitSetup extends StatefulWidget {
   final String userName;
@@ -18,6 +19,7 @@ class HabitSetup extends StatefulWidget {
 
 class _HabitSetupState extends State<HabitSetup> {
   int _introPage = 0;
+  bool _checkingIntro = true;
   int? _editingIndex;
   final List<String> _values = [
     "habit",
@@ -66,6 +68,28 @@ class _HabitSetupState extends State<HabitSetup> {
   bool _introForward = true;
   final bool _submitting = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _checkIntroSeen();
+  }
+
+  Future<void> _checkIntroSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    final seen = prefs.getBool('habit_intro_seen') ?? false;
+    if (mounted) {
+      setState(() {
+        _introPage = seen ? 3 : 0;
+        _checkingIntro = false;
+      });
+    }
+  }
+
+  Future<void> _markIntroSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('habit_intro_seen', true);
+  }
+
   bool get _isComplete {
     return List.generate(3, (i) => i).every(
       (i) => _values[i].trim().isNotEmpty && _values[i] != _placeholders[i],
@@ -100,6 +124,7 @@ class _HabitSetupState extends State<HabitSetup> {
     if (_introPage < 2) {
       setState(() => _introPage++);
     } else {
+      _markIntroSeen();
       setState(() => _introPage = 3);
     }
   }
@@ -416,6 +441,11 @@ class _HabitSetupState extends State<HabitSetup> {
 
   @override
   Widget build(BuildContext context) {
+    if (_checkingIntro) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     return Scaffold(
       body: SafeArea(
         child: _introPage < 3
