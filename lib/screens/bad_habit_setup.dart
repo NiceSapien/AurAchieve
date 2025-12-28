@@ -1,68 +1,54 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../api_service.dart';
-import 'reminder_setup_screen.dart';
 
-class HabitSetup extends StatefulWidget {
-  final String userName;
+class BadHabitSetup extends StatefulWidget {
   final ApiService apiService;
   final Map<String, dynamic>? initialHabit;
 
-  const HabitSetup({
-    super.key,
-    required this.userName,
-    required this.apiService,
-    this.initialHabit,
-  });
+  const BadHabitSetup({super.key, required this.apiService, this.initialHabit});
 
   @override
-  State<HabitSetup> createState() => _HabitSetupState();
+  State<BadHabitSetup> createState() => _BadHabitSetupState();
 }
 
-class _HabitSetupState extends State<HabitSetup> {
+class _BadHabitSetupState extends State<BadHabitSetup> {
   int? _editingIndex;
-  final List<String> _values = [
-    "habit",
-    "time/location",
-    "type of person I want to be",
-  ];
-  final List<String> _placeholders = [
-    "habit",
-    "time/location",
-    "type of person I want to be",
-  ];
+  final List<String> _values = ["bad habit", "consequence"];
+  final List<String> _placeholders = ["bad habit", "consequence"];
   final TextEditingController _inputController = TextEditingController();
-  bool _isEditing = false;
+  String _severity = 'average';
   bool _submitting = false;
+  bool _isEditing = false;
+
+  final Map<String, String> _severityLabels = {
+    'average': "Somewhat Bad",
+    'high': "Bad",
+    'vhigh': "Very Bad",
+    'extreme': "Extremely Bad",
+  };
 
   static const habitSuggestions = [
-    'exercise',
-    'study',
-    'put on my running shoes',
-    'take a deep breath',
-    'meditate for 10 minutes',
-    'write one sentence',
-    'text one friend',
-    'read 20 pages',
-    'pray',
-    'go for a walk',
-    'eat one bite of salad',
+    'bite my nails',
+    'smoke cigarettes',
+    'procrastinate',
+    'eat junk food',
+    'stay up too late',
+    'spend too much money',
+    'check my phone too often',
+    'skip the gym',
+    'interrupt people',
   ];
-  static const cueSuggestions = [
-    'when I wake up',
-    'every day at 7am',
-    'after I finish breakfast',
-    'in the bathroom',
-    'when I close my laptop',
-  ];
-  static const goalSuggestions = [
-    'a stronger person',
-    'a smarter person',
-    'an active person',
-    'a mindful person',
-    'a dedicated musician',
-    'a writer',
-    'a healthy person',
+
+  static const consequenceSuggestions = [
+    'I will get sick',
+    'I will lose money',
+    'I will waste time',
+    'I will feel guilty',
+    'my health will suffer',
+    'I will be stressed',
+    'I will regret it',
+    'I will lose focus',
   ];
 
   @override
@@ -73,9 +59,9 @@ class _HabitSetupState extends State<HabitSetup> {
       final h = widget.initialHabit!;
       _values[0] = (h['habitName'] ?? h['habit'] ?? _placeholders[0])
           .toString();
-      _values[1] = (h['habitLocation'] ?? h['location'] ?? _placeholders[1])
-          .toString();
-      _values[2] = (h['habitGoal'] ?? h['goal'] ?? _placeholders[2]).toString();
+      _values[1] = (h['habitGoal'] ?? h['goal'] ?? _placeholders[1]).toString();
+      _severity = (h['severity'] ?? 'average').toString();
+      if (!_severityLabels.containsKey(_severity)) _severity = 'average';
     }
   }
 
@@ -106,59 +92,50 @@ class _HabitSetupState extends State<HabitSetup> {
     }
   }
 
-  Future<void> _saveHabit() async {
-    if (_values.any((v) => _placeholders.contains(v) || v.trim().isEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please complete the sentence first.')),
-      );
+  Future<void> _submit() async {
+    if (_values[0] == _placeholders[0] || _values[0].trim().isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please enter a bad habit')));
       return;
     }
 
     setState(() => _submitting = true);
     try {
-      final id =
-          (widget.initialHabit![r'$id'] ??
-                  widget.initialHabit!['id'] ??
-                  widget.initialHabit!['habitId'])
-              .toString();
-      final updatedHabit = await widget.apiService.editHabit(
-        habitId: id,
-        habitName: _values[0],
-        habitLocation: _values[1],
-        habitGoal: _values[2],
-      );
-      if (mounted) Navigator.pop(context, updatedHabit);
+      if (_isEditing) {
+        final id =
+            (widget.initialHabit![r'$id'] ??
+                    widget.initialHabit!['id'] ??
+                    widget.initialHabit!['habitId'])
+                .toString();
+        final updated = await widget.apiService.editBadHabit(
+          habitId: id,
+          habitName: _values[0].trim(),
+          severity: _severity,
+          habitGoal: _values[1] == _placeholders[1] ? '' : _values[1].trim(),
+        );
+        if (mounted) Navigator.pop(context, updated);
+      } else {
+        await widget.apiService.createBadHabit(
+          habitName: _values[0].trim(),
+          severity: _severity,
+          habitGoal: _values[1] == _placeholders[1] ? '' : _values[1].trim(),
+        );
+        if (mounted) Navigator.pop(context, true);
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update habit: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to ${_isEditing ? 'update' : 'add'} bad habit: $e',
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
-  }
-
-  void _continueToReminders() async {
-    if (_values.any((v) => _placeholders.contains(v) || v.trim().isEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please complete the sentence first.')),
-      );
-      return;
-    }
-
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ReminderSetupScreen(
-          apiService: widget.apiService,
-          habitName: _values[0].trim(),
-          habitCue: _values[1].trim(),
-          habitGoal: _values[2].trim(),
-        ),
-      ),
-    );
-    if (result == true && mounted) Navigator.pop(context, true);
   }
 
   Widget _buildEditableSentence() {
@@ -181,7 +158,7 @@ class _HabitSetupState extends State<HabitSetup> {
           alignment: WrapAlignment.center,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Text("I will ", style: normalStyle),
+            Text("If I ", style: normalStyle),
             GestureDetector(
               onTap: () => _startEdit(0),
               child: Text(
@@ -191,22 +168,12 @@ class _HabitSetupState extends State<HabitSetup> {
                     : underlineStyle,
               ),
             ),
-            Text(", ", style: normalStyle),
+            Text(", then ", style: normalStyle),
             GestureDetector(
               onTap: () => _startEdit(1),
               child: Text(
                 _values[1],
                 style: _values[1] == _placeholders[1]
-                    ? placeholderStyle
-                    : underlineStyle,
-              ),
-            ),
-            Text(" so that I can become ", style: normalStyle),
-            GestureDetector(
-              onTap: () => _startEdit(2),
-              child: Text(
-                _values[2],
-                style: _values[2] == _placeholders[2]
                     ? placeholderStyle
                     : underlineStyle,
               ),
@@ -218,12 +185,54 @@ class _HabitSetupState extends State<HabitSetup> {
     );
   }
 
+  Widget _buildSeveritySelector() {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      children: [
+        Text(
+          "How bad is this habit?",
+          style: GoogleFonts.gabarito(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: cs.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          alignment: WrapAlignment.center,
+          children: _severityLabels.entries.map((entry) {
+            final isSelected = _severity == entry.key;
+            return ChoiceChip(
+              label: Text(entry.value),
+              selected: isSelected,
+              onSelected: (selected) {
+                if (selected) setState(() => _severity = entry.key);
+              },
+              labelStyle: GoogleFonts.gabarito(
+                color: isSelected ? cs.onPrimary : cs.onSurface,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+              selectedColor: cs.primary,
+              checkmarkColor: cs.onPrimary,
+              backgroundColor: cs.surfaceContainerHighest,
+              side: BorderSide.none,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
   Widget _buildEditInput() {
     if (_editingIndex == null) return const SizedBox.shrink();
     final cs = Theme.of(context).colorScheme;
     final suggestions = _editingIndex == 0
         ? habitSuggestions
-        : (_editingIndex == 1 ? cueSuggestions : goalSuggestions);
+        : consequenceSuggestions;
 
     return Container(
       color: cs.surface,
@@ -292,14 +301,14 @@ class _HabitSetupState extends State<HabitSetup> {
 
   @override
   Widget build(BuildContext context) {
-    final isComplete = !_values.any(
-      (v) => _placeholders.contains(v) || v.trim().isEmpty,
-    );
+    final cs = Theme.of(context).colorScheme;
+    final isComplete =
+        _values[0] != _placeholders[0] && _values[0].trim().isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          _isEditing ? 'Edit Habit' : 'New Habit',
+          _isEditing ? 'Edit Bad Habit' : 'New Bad Habit',
           style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
@@ -311,7 +320,13 @@ class _HabitSetupState extends State<HabitSetup> {
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: [_buildEditableSentence()],
+                  children: [
+                    _buildEditableSentence(),
+                    if (_editingIndex == null) ...[
+                      const SizedBox(height: 48),
+                      _buildSeveritySelector(),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -325,22 +340,22 @@ class _HabitSetupState extends State<HabitSetup> {
                 width: double.infinity,
                 height: 56,
                 child: FilledButton(
-                  onPressed: _submitting
-                      ? null
-                      : (isComplete
-                            ? (_isEditing ? _saveHabit : _continueToReminders)
-                            : null),
+                  onPressed: isComplete && !_submitting ? _submit : null,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: cs.error,
+                    foregroundColor: cs.onError,
+                  ),
                   child: _submitting
-                      ? const SizedBox(
-                          width: 24,
+                      ? SizedBox(
                           height: 24,
+                          width: 24,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.white,
+                            color: cs.onError,
                           ),
                         )
                       : Text(
-                          _isEditing ? "Save" : "Continue",
+                          _isEditing ? "Save" : "Break this habit",
                           style: GoogleFonts.gabarito(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,

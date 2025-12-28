@@ -4,6 +4,7 @@ import 'package:appwrite/appwrite.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 dynamic _parseJson(String jsonString) {
   return jsonDecode(jsonString);
@@ -14,6 +15,13 @@ class AppConfig {
       'https://auraascend-fgf4aqf5gubgacb3.centralindia-01.azurewebsites.net';
   static String baseUrl = defaultBaseUrl;
 
+  static const String defaultAppwriteEndpoint =
+      'https://fra.cloud.appwrite.io/v1';
+  static String appwriteEndpoint = defaultAppwriteEndpoint;
+
+  static const String defaultAppwriteProjectId = '6800a2680008a268a6a3';
+  static String appwriteProjectId = defaultAppwriteProjectId;
+
   static void setBaseUrl(String newUrl) {
     if (newUrl.isNotEmpty &&
         (newUrl.startsWith('http://') || newUrl.startsWith('https://'))) {
@@ -23,8 +31,50 @@ class AppConfig {
     }
   }
 
+  static void setAppwriteConfig(String endpoint, String projectId) {
+    if (endpoint.isNotEmpty) appwriteEndpoint = endpoint;
+    if (projectId.isNotEmpty) appwriteProjectId = projectId;
+  }
+
+  static const String _prefKey = 'api_base_url';
+  static const String _prefKeyAppwriteEndpoint = 'appwrite_endpoint';
+  static const String _prefKeyAppwriteProject = 'appwrite_project_id';
+
   static void resetToDefault() {
     baseUrl = defaultBaseUrl;
+    appwriteEndpoint = defaultAppwriteEndpoint;
+    appwriteProjectId = defaultAppwriteProjectId;
+  }
+
+  static Future<void> loadFromPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_prefKey);
+    if (saved != null && saved.isNotEmpty) {
+      setBaseUrl(saved);
+    } else {
+      baseUrl = defaultBaseUrl;
+    }
+
+    final savedEndpoint = prefs.getString(_prefKeyAppwriteEndpoint);
+    if (savedEndpoint != null && savedEndpoint.isNotEmpty) {
+      appwriteEndpoint = savedEndpoint;
+    } else {
+      appwriteEndpoint = defaultAppwriteEndpoint;
+    }
+
+    final savedProject = prefs.getString(_prefKeyAppwriteProject);
+    if (savedProject != null && savedProject.isNotEmpty) {
+      appwriteProjectId = savedProject;
+    } else {
+      appwriteProjectId = defaultAppwriteProjectId;
+    }
+  }
+
+  static Future<void> saveToPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefKey, baseUrl);
+    await prefs.setString(_prefKeyAppwriteEndpoint, appwriteEndpoint);
+    await prefs.setString(_prefKeyAppwriteProject, appwriteProjectId);
   }
 }
 
@@ -517,7 +567,7 @@ class ApiService {
     return habits;
   }
 
-  Future<List<String>> incrementHabitCompletedTimes(
+  Future<Map<String, dynamic>> incrementHabitCompletedTimes(
     String habitId, {
     required List<String> completedDays,
   }) async {
@@ -534,27 +584,7 @@ class ApiService {
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception('Failed to update habit: ${response.body}');
     }
-    final data = await compute(_parseJson, response.body);
-    if (data is Map) {
-      final raw = data['completedDays'];
-      if (raw is String && raw.isNotEmpty) {
-        try {
-          final parsed = jsonDecode(raw);
-          if (parsed is List) {
-            return List<String>.from(parsed.map((e) => e.toString()));
-          }
-        } catch (_) {}
-
-        return raw
-            .split(',')
-            .map((e) => e.trim())
-            .where((e) => e.isNotEmpty)
-            .toList();
-      } else if (raw is List) {
-        return List<String>.from(raw.map((e) => e.toString()));
-      }
-    }
-    return completedDays;
+    return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
   }
 
   Future<void> saveHabitReminderLocal(
@@ -596,6 +626,129 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> editHabit({
+    required String habitId,
+    String? habitName,
+    String? habitLocation,
+    String? habitGoal,
+    List<String>? completedDays,
+  }) async {
+    final body = <String, dynamic>{'habitId': habitId};
+    if (habitName != null) body['habitName'] = habitName;
+    if (habitLocation != null) body['habitLocation'] = habitLocation;
+    if (habitGoal != null) body['habitGoal'] = habitGoal;
+    if (completedDays != null) body['completedDays'] = completedDays;
+
+    final response = await _performRequest(
+      'PATCH',
+      '/api/habit',
+      body: jsonEncode(body),
+    );
+
+    if (response.statusCode == 200) {
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to edit habit: ${response.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> editBadHabit({
+    required String habitId,
+    String? habitName,
+    String? habitGoal,
+    String? severity,
+    List<String>? completedDays,
+  }) async {
+    final body = <String, dynamic>{'habitId': habitId};
+    if (habitName != null) body['habitName'] = habitName;
+    if (habitGoal != null) body['habitGoal'] = habitGoal;
+    if (severity != null) body['severity'] = severity;
+    if (completedDays != null) body['completedDays'] = completedDays;
+
+    final response = await _performRequest(
+      'PATCH',
+      '/api/bad-habit',
+      body: jsonEncode(body),
+    );
+
+    if (response.statusCode == 200) {
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to edit bad habit: ${response.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> createBadHabit({
+    required String habitName,
+    required String severity,
+    String? habitGoal,
+    List<String>? completedDays,
+  }) async {
+    final payload = {
+      'habitName': habitName,
+      'severity': severity,
+      'habitGoal': habitGoal,
+      'completedDays': completedDays ?? <String>[],
+    };
+    print('DEBUG: createBadHabit payload: ${jsonEncode(payload)}');
+    final response = await _performRequest(
+      'POST',
+      '/api/bad-habit',
+      body: jsonEncode(payload),
+    );
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to add bad habit: ${response.body}');
+  }
+
+  Future<List<dynamic>> getBadHabits() async {
+    final res = await _performRequest('GET', '/api/bad-habit');
+    if (res.statusCode != 200) {
+      throw Exception('Failed to load bad habits: ${res.body}');
+    }
+    final data = await compute(_parseJson, res.body);
+    if (data is List) return data;
+    if (data is Map) {
+      return (data['data'] ?? data['items'] ?? []) as List;
+    }
+    return [];
+  }
+
+  Future<Map<String, dynamic>> incrementBadHabit(
+    String habitId, {
+    int incrementBy = 1,
+    List<String>? completedDays,
+  }) async {
+    final payload = <String, dynamic>{
+      'habitId': habitId,
+      'incrementBy': incrementBy,
+    };
+    if (completedDays != null) {
+      payload['completedDays'] = completedDays;
+    }
+    final response = await _performRequest(
+      'PUT',
+      '/api/bad-habit',
+      body: jsonEncode(payload),
+    );
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception('Failed to update bad habit: ${response.body}');
+    }
+    return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteBadHabit(String habitId) async {
+    final res = await _performRequest(
+      'DELETE',
+      '/api/bad-habit',
+      body: jsonEncode({'habitId': habitId}),
+    );
+    if (res.statusCode != 200 && res.statusCode != 204) {
+      throw Exception('Failed to delete bad habit: ${res.body}');
+    }
+  }
+
   Future<Map<String, dynamic>> getTasksAndHabits() async {
     if (AppConfig.baseUrl != AppConfig.defaultBaseUrl) {
       final resp = await _performRequest('GET', '/api/tasks');
@@ -605,10 +758,31 @@ class ApiService {
         );
       }
       final data = await compute(_parseJson, resp.body);
+
+      if (data is Map<String, dynamic> &&
+          (data.containsKey('tasks') ||
+              data.containsKey('habits') ||
+              data.containsKey('badHabits'))) {
+        return {
+          'tasks': (data['tasks'] as List?) ?? [],
+          'habits': (data['habits'] as List?) ?? [],
+          'badHabits': (data['badHabits'] as List?) ?? [],
+          'studyPlan': data['studyPlan'],
+          'userId': data['userId'],
+          'name': data['name'],
+          'email': data['email'],
+          'aura': data['aura'],
+          'validationCount': data['validationCount'],
+          'lastValidationResetDate': data['lastValidationResetDate'],
+          'quote': data['quote'],
+        };
+      }
+
       final tasks = data is List ? data : _extractList(data);
       return {
         'tasks': tasks,
         'habits': const [],
+        'badHabits': const [],
         'studyPlan': null,
         'userId': null,
         'name': null,
@@ -623,13 +797,14 @@ class ApiService {
     final resp = await _performRequest(
       'GET',
       '',
-      overrideUrl: 'https://691ad65c0008a1107855.fra.appwrite.run',
+      overrideUrl: AppConfig.baseUrl + '/api/tasks',
     );
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       if (resp.statusCode == 404) {
         return {
           'tasks': [],
           'habits': [],
+          'badHabits': [],
           'studyPlan': null,
           'userId': null,
           'name': null,
@@ -646,6 +821,7 @@ class ApiService {
     return {
       'tasks': (root['tasks'] as List?) ?? const [],
       'habits': (root['habits'] as List?) ?? const [],
+      'badHabits': (root['badHabits'] as List?) ?? const [],
       'studyPlan': root['studyPlan'],
       'userId': root['userId'],
       'name': root['name'],

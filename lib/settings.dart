@@ -3,19 +3,24 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'api_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool showQuote;
+  final bool smartSuggestions;
   final Set<String> enabledTabs;
   final ValueChanged<bool> onShowQuoteChanged;
+  final ValueChanged<bool> onSmartSuggestionsChanged;
   final ValueChanged<Set<String>> onEnabledTabsChanged;
   final VoidCallback onLogout;
 
   const SettingsScreen({
     super.key,
     required this.showQuote,
+    required this.smartSuggestions,
     required this.enabledTabs,
     required this.onShowQuoteChanged,
+    required this.onSmartSuggestionsChanged,
     required this.onEnabledTabsChanged,
     required this.onLogout,
   });
@@ -26,6 +31,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late bool _showQuote;
+  late bool _smartSuggestions;
   late Set<String> _tabs;
   String? _jwt;
 
@@ -37,9 +43,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _showQuote = widget.showQuote;
+    _smartSuggestions = widget.smartSuggestions;
     _tabs = {...widget.enabledTabs};
-    _loadJwt();
-    _loadTimerSettings();
+    _safeLoadJwt();
+    _safeLoadTimerSettings();
+  }
+
+  Future<void> _safeLoadTimerSettings() async {
+    try {
+      await _loadTimerSettings();
+    } catch (e) {
+      debugPrint('Error loading timer settings: $e');
+    }
+  }
+
+  Future<void> _safeLoadJwt() async {
+    try {
+      await _loadJwt();
+    } catch (e) {
+      debugPrint('Error loading JWT: $e');
+    }
   }
 
   Future<void> _loadTimerSettings() async {
@@ -90,7 +113,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _confirmAndLogout() async {
-    final cs = Theme.of(context).colorScheme;
     final ok = await showDialog<bool>(
       context: context,
       barrierDismissible: true,
@@ -216,6 +238,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     widget.onShowQuoteChanged(v);
                   },
                 ),
+                SwitchListTile.adaptive(
+                  contentPadding: tilePadding,
+                  title: const Text('Smart Suggestions'),
+                  subtitle: const Text('Show suggestions for stalled habits'),
+                  value: _smartSuggestions,
+                  onChanged: (v) {
+                    setState(() => _smartSuggestions = v);
+                    widget.onSmartSuggestionsChanged(v);
+                  },
+                ),
               ],
             ),
           ),
@@ -284,6 +316,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: const Text('Home'),
                   value: true,
                   onChanged: null,
+                ),
+                SwitchListTile.adaptive(
+                  contentPadding: tilePadding,
+                  title: const Text('Timer'),
+                  value: _tabs.contains('timer'),
+                  onChanged: (v) => _toggleTab('timer', v),
                 ),
                 SwitchListTile.adaptive(
                   contentPadding: tilePadding,
@@ -436,6 +474,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 20),
+          if (AppConfig.baseUrl != AppConfig.defaultBaseUrl)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Center(
+                child: Text(
+                  'Connected to ${AppConfig.baseUrl}',
+                  style: GoogleFonts.gabarito(
+                    fontSize: 12,
+                    color: cs.onSurfaceVariant.withOpacity(0.6),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

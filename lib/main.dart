@@ -85,13 +85,14 @@ void main() async {
   await _initializeTimezone();
   await _initializeNotifications();
 
+  await AppConfig.loadFromPrefs();
+
   Client client = Client();
   client
-      .setEndpoint('https://fra.cloud.appwrite.io/v1')
-      .setProject('6800a2680008a268a6a3')
+      .setEndpoint(AppConfig.appwriteEndpoint)
+      .setProject(AppConfig.appwriteProjectId)
       .setSelfSigned(status: true);
   Account account = Account(client);
-  AppConfig.resetToDefault();
   runApp(MyApp(account: account));
 }
 
@@ -332,6 +333,14 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
       context: context,
       barrierDismissible: false,
       builder: (context) {
+        bool showAppwriteSettings = false;
+        final projectIdController = TextEditingController(
+          text: AppConfig.appwriteProjectId,
+        );
+        final endpointController = TextEditingController(
+          text: AppConfig.appwriteEndpoint,
+        );
+
         return StatefulBuilder(
           builder: (context, setState) {
             final theme = Theme.of(context);
@@ -343,6 +352,9 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
               });
 
               final url = controller.text.trim();
+              final awEndpoint = endpointController.text.trim();
+              final awProject = projectIdController.text.trim();
+
               if (url.isEmpty ||
                   !(url.startsWith('http://') || url.startsWith('https://'))) {
                 setState(() {
@@ -360,11 +372,19 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                 if (response.statusCode == 200 &&
                     response.body == 'feel alive.') {
                   AppConfig.setBaseUrl(url);
+                  AppConfig.setAppwriteConfig(awEndpoint, awProject);
+                  await AppConfig.saveToPrefs();
+
+                  // Update the active client
+                  widget.account.client
+                      .setEndpoint(awEndpoint)
+                      .setProject(awProject);
+
                   if (mounted) {
                     Navigator.of(context).pop();
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('API endpoint updated for this session.'),
+                        content: Text('Settings updated successfully.'),
                         behavior: SnackBarBehavior.floating,
                       ),
                     );
@@ -388,22 +408,78 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                 'Server API Endpoint',
                 style: TextStyle(color: theme.colorScheme.onSurface),
               ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: controller,
-                    decoration: InputDecoration(
-                      hintText: 'http://localhost:3000',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: controller,
+                      decoration: InputDecoration(
+                        hintText: 'http://localhost:3000',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        errorText: errorText,
                       ),
-                      errorText: errorText,
+                      style: TextStyle(color: theme.colorScheme.onSurface),
+                      enabled: !isLoading,
                     ),
-                    style: TextStyle(color: theme.colorScheme.onSurface),
-                    enabled: !isLoading,
-                  ),
-                ],
+                    const SizedBox(height: 16),
+                    InkWell(
+                      onTap: () => setState(
+                        () => showAppwriteSettings = !showAppwriteSettings,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          children: [
+                            Icon(
+                              showAppwriteSettings
+                                  ? Icons.arrow_drop_down_rounded
+                                  : Icons.arrow_right_rounded,
+                              color: theme.colorScheme.primary,
+                            ),
+                            Text(
+                              'Appwrite Settings',
+                              style: TextStyle(
+                                color: theme.colorScheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (showAppwriteSettings) ...[
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: endpointController,
+                        decoration: InputDecoration(
+                          labelText: 'Appwrite Endpoint',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        style: TextStyle(color: theme.colorScheme.onSurface),
+                        enabled: !isLoading,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: projectIdController,
+                        decoration: InputDecoration(
+                          labelText: 'Project ID',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        style: TextStyle(color: theme.colorScheme.onSurface),
+                        enabled: !isLoading,
+                      ),
+                    ],
+                  ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -953,7 +1029,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
               style: linkStyle,
               recognizer: TapGestureRecognizer()
                 ..onTap = () {
-                  _launchUrl('https://google.com');
+                  _launchUrl('https://aurachieve.com/privacy');
                 },
             ),
             const TextSpan(text: '.'),

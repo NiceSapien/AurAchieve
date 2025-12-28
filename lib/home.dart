@@ -13,7 +13,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:math' as math;
 
 import 'social_blocker.dart';
-import 'stats.dart';
 import 'api_service.dart';
 import 'widgets/dynamic_color_svg.dart';
 import 'main.dart' show AuthCheck;
@@ -21,6 +20,7 @@ import 'timer_page.dart';
 import 'study_planner.dart';
 import 'screens/extended_task_list.dart';
 import 'habits.dart';
+import 'widgets/habit_details_sheet.dart';
 import 'settings.dart';
 
 enum AuraHistoryView { day, month, year }
@@ -87,6 +87,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   List<Task> tasks = [];
   List<Task> completedTasks = [];
   int aura = 50;
+  int _aura = 50;
   List<int> auraHistory = [50];
   List<DateTime?> auraDates = [];
   AuraHistoryView auraHistoryView = AuraHistoryView.day;
@@ -137,8 +138,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   static const _prefShowQuote = 'pref_show_quote';
   static const _prefEnabledTabs = 'pref_enabled_tabs';
+  static const _prefSmartSuggestions = 'pref_smart_suggestions';
 
-  Set<String> _enabledTabs = {'habits', 'blocker', 'planner'};
+  Set<String> _enabledTabs = {'habits', 'blocker', 'planner', 'timer'};
+  bool _smartSuggestions = true;
 
   final bool _showAllTasks = false;
   final bool _showAllStudyTasks = false;
@@ -336,8 +339,39 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     try {
       final dashboard = await _apiService.getTasksAndHabits();
 
+      List<dynamic> badHabits = (dashboard['badHabits'] as List?) ?? [];
+      if (badHabits.isEmpty) {
+        try {
+          badHabits = await _apiService.getBadHabits();
+          print(
+            'DEBUG: Fetched ${badHabits.length} bad habits via separate call',
+          );
+        } catch (e) {
+          debugPrint('Failed to fetch bad habits: $e');
+        }
+      } else {
+        print('DEBUG: Fetched ${badHabits.length} bad habits from dashboard');
+      }
+
       final fetchedTasks = (dashboard['tasks'] as List?) ?? const [];
-      final fetchedHabits = (dashboard['habits'] as List?) ?? const [];
+      final goodHabits = (dashboard['habits'] as List?) ?? const [];
+
+      final allHabits = <Map<String, dynamic>>[];
+      for (final h in goodHabits) {
+        if (h is Map) {
+          final m = Map<String, dynamic>.from(h);
+          m['type'] = 'good';
+          allHabits.add(m);
+        }
+      }
+      for (final h in badHabits) {
+        if (h is Map) {
+          final m = Map<String, dynamic>.from(h);
+          m['type'] = 'bad';
+          allHabits.add(m);
+        }
+      }
+
       final allTasks = fetchedTasks
           .map((t) => Task.fromJson(t as Map<String, dynamic>))
           .toList();
@@ -375,7 +409,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             .where((t) => t.status == 'completed')
             .toList();
         tasks = allTasks.where((t) => t.status == 'pending').toList();
-        _preloadedHabits = fetchedHabits;
+        _preloadedHabits = allHabits;
 
         _studyPlanMap = planMap;
         _isStudyPlanSetupComplete = planMap != null && planMap.isNotEmpty;
@@ -731,7 +765,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             backgroundColor: Theme.of(context).colorScheme.primary,
           ),
         );
-      } else if (apiCallResult == null && mounted) {}
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -840,13 +874,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
     final showQuote = prefs.getBool(_prefShowQuote);
+    final smartSuggestions = prefs.getBool(_prefSmartSuggestions);
     final tabs = prefs.getStringList(_prefEnabledTabs);
     if (!mounted) return;
     setState(() {
       if (showQuote != null) _showQuote = showQuote;
-      _enabledTabs = (tabs?.toSet() ?? {'habits', 'blocker', 'planner'})
-          .where((t) => {'habits', 'blocker', 'planner'}.contains(t))
-          .toSet();
+      if (smartSuggestions != null) _smartSuggestions = smartSuggestions;
+      _enabledTabs =
+          (tabs?.toSet() ?? {'habits', 'blocker', 'planner', 'timer'})
+              .where(
+                (t) => {'habits', 'blocker', 'planner', 'timer'}.contains(t),
+              )
+              .toSet();
       if (_enabledTabs.isEmpty) _enabledTabs = {'habits'};
       final keys = _currentTabKeys();
       if (_selectedIndex >= keys.length) _selectedIndex = 0;
@@ -857,6 +896,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefShowQuote, value);
     if (mounted) setState(() => _showQuote = value);
+  }
+
+  Future<void> _updateSmartSuggestions(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefSmartSuggestions, value);
+    if (mounted) setState(() => _smartSuggestions = value);
   }
 
   Future<void> _updateEnabledTabs(Set<String> tabs) async {
@@ -872,7 +917,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   List<String> _currentTabKeys() {
-    final keys = <String>['home', 'timer'];
+    final keys = <String>['home'];
+    if (_enabledTabs.contains('timer')) keys.add('timer');
     if (_enabledTabs.contains('habits')) keys.add('habits');
     if (_enabledTabs.contains('blocker')) keys.add('blocker');
     if (_enabledTabs.contains('planner')) keys.add('planner');
@@ -888,7 +934,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     if (_enabledTabs.contains('habits')) {
       pages.add(
-        HabitsPage(apiService: _apiService, initialHabits: _preloadedHabits),
+        HabitsPage(
+          apiService: _apiService,
+          userName: userName,
+          initialHabits: _preloadedHabits,
+          smartSuggestionsEnabled: _smartSuggestions,
+        ),
       );
       keys.add('habits');
     }
@@ -923,7 +974,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         return HabitsPage(
           key: _habitsKey,
           apiService: _apiService,
+          userName: userName,
           initialHabits: _preloadedHabits,
+          smartSuggestionsEnabled: _smartSuggestions,
         );
       case 'blocker':
         return SocialMediaBlockerScreen(
@@ -1048,26 +1101,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           actions: [
             IconButton(
               icon: Icon(
-                Icons.bar_chart_rounded,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-              tooltip: 'Stats',
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => StatsPage(
-                      aura: aura,
-                      tasks: tasks.where((t) => t.status == 'pending').toList(),
-                      auraHistory: getAuraHistoryForView(),
-                      auraDates: getAuraDatesForView(),
-                      completedTasks: completedTasks,
-                    ),
-                  ),
-                );
-              },
-            ),
-            IconButton(
-              icon: Icon(
                 Icons.settings_outlined,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -1077,8 +1110,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   MaterialPageRoute(
                     builder: (context) => SettingsScreen(
                       showQuote: _showQuote,
+                      smartSuggestions: _smartSuggestions,
                       enabledTabs: _enabledTabs,
                       onShowQuoteChanged: _updateShowQuote,
+                      onSmartSuggestionsChanged: _updateSmartSuggestions,
                       onEnabledTabsChanged: (tabs) async {
                         if (tabs.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -1113,7 +1148,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   const TimerPage(),
                   HabitsPage(
                     apiService: _apiService,
+                    userName: userName,
                     initialHabits: _preloadedHabits,
+                    currentAura: _aura,
+                    onAuraChange: (val) => setState(() {
+                      aura = val;
+                      _aura = val;
+                    }),
                   ),
                   SocialMediaBlockerScreen(
                     apiService: _apiService,
@@ -1263,6 +1304,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         .toString();
     if (id.isEmpty) return;
 
+    final isBad = habit['type'] == 'bad';
     final prevCount = habit['completedTimes'] as int? ?? 0;
     final prevDays = _normalizeCompletedDays(habit['completedDays']);
     final today = _todayLocalKey();
@@ -1280,10 +1322,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _bounceController.forward(from: 0);
 
     try {
-      await _apiService.incrementHabitCompletedTimes(
-        id,
-        completedDays: updatedDays,
-      );
+      Map<String, dynamic> result;
+      if (isBad) {
+        result = await _apiService.incrementBadHabit(id);
+      } else {
+        result = await _apiService.incrementHabitCompletedTimes(
+          id,
+          completedDays: updatedDays,
+        );
+      }
+
+      if (mounted) {
+        final newAura = result['aura'];
+        if (newAura is num) {
+          setState(() {
+            aura = newAura.toInt();
+            _aura = newAura.toInt();
+          });
+        }
+      }
     } catch (e) {
       setState(() {
         habit['completedTimes'] = prevCount;
@@ -1302,43 +1359,120 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _showHabitDetails(Map<String, dynamic> habit) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        final name = (habit['habitName'] ?? habit['habit'] ?? '').toString();
-        final goal = (habit['habitGoal'] ?? habit['goal'] ?? '').toString();
-        final totalCompletions = habit['completedTimes'] as int? ?? 0;
-        final completedDays = _normalizeCompletedDays(habit['completedDays']);
-        return AlertDialog(
-          title: Text(
-            name,
-            style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (goal.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8.0),
-                  child: Text('Goal: $goal', style: GoogleFonts.gabarito()),
-                ),
-              Text(
-                'Total Completions: $totalCompletions',
-                style: GoogleFonts.gabarito(),
-              ),
-              Text(
-                'Completed Days: ${completedDays.length}',
-                style: GoogleFonts.gabarito(),
-              ),
-            ],
-          ),
+    final isBad = habit['type'] == 'bad';
+    if (isBad) {
+      final id = (habit[r'$id'] ?? habit['id'] ?? habit['habitId'] ?? '')
+          .toString();
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(habit['habitName'] ?? 'Bad Habit'),
+          content: const Text('Delete this bad habit?'),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                try {
+                  await _apiService.deleteBadHabit(id);
+                  if (mounted) {
+                    setState(() {
+                      _preloadedHabits.removeWhere(
+                        (h) =>
+                            (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '')
+                                .toString() ==
+                            id,
+                      );
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Bad habit deleted')),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Delete failed: $e')),
+                    );
+                  }
+                }
+              },
+              child: const Text('Delete', style: TextStyle(color: Colors.red)),
             ),
           ],
+        ),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) {
+        return HabitDetailsSheet(
+          habit: habit,
+          apiService: _apiService,
+          userName: userName,
+          onDelete: (id) async {
+            try {
+              await _apiService.deleteHabit(id);
+              if (mounted) {
+                setState(() {
+                  _preloadedHabits.removeWhere(
+                    (h) =>
+                        (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '')
+                            .toString() ==
+                        id,
+                  );
+                });
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Habit deleted')));
+              }
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+              }
+            }
+          },
+          onUpdate: (updatedHabit) {
+            if (mounted) {
+              setState(() {
+                final id =
+                    (updatedHabit[r'$id'] ??
+                            updatedHabit['id'] ??
+                            updatedHabit['habitId'] ??
+                            '')
+                        .toString();
+                final index = _preloadedHabits.indexWhere(
+                  (h) =>
+                      (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '').toString() ==
+                      id,
+                );
+                if (index != -1) {
+                  final existing = _preloadedHabits[index];
+                  final merged = Map<String, dynamic>.from(existing);
+                  merged.addAll(updatedHabit);
+
+                  if (!updatedHabit.containsKey('type')) {
+                    merged['type'] = existing['type'];
+                  }
+
+                  merged['completedDays'] = _normalizeCompletedDays(
+                    merged['completedDays'],
+                  );
+                  _preloadedHabits[index] = merged;
+                }
+              });
+            }
+          },
         );
       },
     );
@@ -1351,10 +1485,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   ) {
     final id = (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '').toString();
     final name = (h['habitName'] ?? h['habit'] ?? '').toString();
-    final goal = (h['habitGoal'] ?? h['goal'] ?? '').toString();
+    final isBad = h['type'] == 'bad';
+    final badGoal = (h['habitGoal'] ?? '').toString();
+    final goal = isBad
+        ? (badGoal.isNotEmpty
+              ? badGoal
+              : (h['severity'] ?? 'Bad Habit').toString())
+        : (h['habitGoal'] ?? h['goal'] ?? '').toString();
     final totalCompletions = h['completedTimes'] as int? ?? 0;
 
     final completedDaysRaw = _normalizeCompletedDays(h['completedDays']);
+    final todayStr = _todayLocalKey();
+    final completedToday = completedDaysRaw.contains(todayStr);
 
     final completedDates = completedDaysRaw
         .map((s) {
@@ -1369,7 +1511,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         .toSet();
     final streak = _computeStreak(completedDates);
 
-    final colorPair = (bg: scheme.surfaceContainer, fg: scheme.onSurface);
+    final colorPair = isBad
+        ? (bg: scheme.errorContainer, fg: scheme.onErrorContainer)
+        : (bg: scheme.surfaceContainer, fg: scheme.onSurface);
     final shape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(16.0),
     );
@@ -1391,7 +1535,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: radius,
-          side: BorderSide(color: scheme.outlineVariant.withOpacity(0.5)),
+          side: BorderSide(
+            color: isBad
+                ? scheme.error.withOpacity(0.5)
+                : scheme.outlineVariant.withOpacity(0.5),
+          ),
         ),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -1420,7 +1568,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           child: ClipRRect(
                             borderRadius: radius,
                             child: Container(
-                              color: scheme.primary.withOpacity(0.22),
+                              color: (isBad ? scheme.error : scheme.primary)
+                                  .withOpacity(0.22),
                             ),
                           ),
                         ),
@@ -1440,7 +1589,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'I will',
+                            isBad ? 'If I' : 'I will',
                             style: GoogleFonts.gabarito(
                               fontSize: 13,
                               color: colorPair.fg.withOpacity(0.8),
@@ -1467,7 +1616,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                 ),
                                 children: [
                                   TextSpan(
-                                    text: 'to become ',
+                                    text: isBad ? ', then ' : 'to become ',
                                     style: TextStyle(
                                       color: colorPair.fg.withOpacity(0.8),
                                     ),
@@ -1476,10 +1625,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     text: goal,
                                     style: TextStyle(
                                       color: colorPair.fg,
-                                      decoration: TextDecoration.underline,
-                                      decorationColor: scheme.primary
-                                          .withOpacity(0.8),
-                                      decorationStyle: TextDecorationStyle.wavy,
+                                      decoration: isBad
+                                          ? null
+                                          : TextDecoration.underline,
+                                      decorationColor: isBad
+                                          ? null
+                                          : scheme.primary.withOpacity(0.8),
+                                      decorationStyle: isBad
+                                          ? null
+                                          : TextDecorationStyle.wavy,
                                       decorationThickness: 1.5,
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -1493,19 +1647,45 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     const SizedBox(width: 16),
                     Row(
                       children: [
-                        _StatBadge(
-                          value: streak,
-                          icon: Icons.local_fire_department_outlined,
-                          color: scheme.primary,
-                          textColor: colorPair.fg,
-                        ),
-                        const SizedBox(width: 12),
-                        _StatBadge(
-                          value: totalCompletions,
-                          icon: Icons.done_all_outlined,
-                          color: scheme.tertiary,
-                          textColor: colorPair.fg,
-                        ),
+                        if (!isBad)
+                          Tooltip(
+                            triggerMode: TooltipTriggerMode.tap,
+                            message: streak > 0
+                                ? (completedToday
+                                      ? 'Streak active! Completed today.'
+                                      : 'Streak active! Complete today to keep it.')
+                                : 'No active streak.',
+                            child: _StatBadge(
+                              value: streak,
+                              icon: streak > 0
+                                  ? Icons.local_fire_department_rounded
+                                  : Icons.local_fire_department_outlined,
+                              backgroundColor: streak > 0
+                                  ? (completedToday
+                                        ? scheme.primary
+                                        : Colors.transparent)
+                                  : scheme.surfaceContainerHighest.withOpacity(
+                                      0.4,
+                                    ),
+                              iconColor: streak > 0
+                                  ? (completedToday
+                                        ? scheme.onPrimary
+                                        : scheme.primary)
+                                  : scheme.onSurfaceVariant.withOpacity(0.6),
+                              borderColor: (streak > 0 && !completedToday)
+                                  ? scheme.primary
+                                  : null,
+                              textColor: colorPair.fg,
+                            ),
+                          ),
+                        if (isBad)
+                          _StatBadge(
+                            value: totalCompletions,
+                            icon: Icons.warning_amber_rounded,
+                            backgroundColor: Colors.transparent,
+                            iconColor: colorPair.fg,
+                            textColor: colorPair.fg,
+                          ),
                       ],
                     ),
                   ],
@@ -1519,6 +1699,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _buildDashboardView() {
+    if (isLoading) {
+      return const _LoadingView();
+    }
+
     final pendingTasks = tasks.where((t) => t.status == 'pending').toList();
 
     if (_taskLoadError != null) {
@@ -1722,7 +1906,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           MaterialPageRoute(
                             builder: (_) => HabitsPage(
                               apiService: _apiService,
+                              userName: userName,
                               initialHabits: _preloadedHabits,
+                              currentAura: _aura,
+                              onAuraChange: (newAura) {
+                                setState(() => _aura = newAura);
+                              },
                             ),
                           ),
                         );
@@ -1731,7 +1920,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   ),
                 ],
               ),
-              ..._preloadedHabits.take(2).map((h) {
+              ..._preloadedHabits.where((h) => h['type'] != 'bad').take(2).map((
+                h,
+              ) {
                 final m = (h is Map<String, dynamic>)
                     ? h
                     : Map<String, dynamic>.from(h as Map);
@@ -2139,29 +2330,35 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 class _StatBadge extends StatelessWidget {
   final int value;
   final IconData icon;
-  final Color color;
+  final Color backgroundColor;
+  final Color iconColor;
+  final Color? borderColor;
   final Color textColor;
 
   const _StatBadge({
     required this.value,
     required this.icon,
-    required this.color,
+    required this.backgroundColor,
+    required this.iconColor,
+    this.borderColor,
     required this.textColor,
   });
 
   @override
   Widget build(BuildContext context) {
-    final iconColor =
-        ThemeData.estimateBrightnessForColor(color) == Brightness.dark
-        ? Colors.white
-        : Colors.black;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Container(
           width: 38,
           height: 38,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            shape: BoxShape.circle,
+            border: borderColor != null
+                ? Border.all(color: borderColor!, width: 2)
+                : null,
+          ),
           child: Icon(icon, size: 22, color: iconColor),
         ),
         const SizedBox(height: 6),
@@ -2174,6 +2371,85 @@ class _StatBadge extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _LoadingView extends StatefulWidget {
+  const _LoadingView();
+
+  @override
+  State<_LoadingView> createState() => _LoadingViewState();
+}
+
+class _LoadingViewState extends State<_LoadingView> {
+  final List<String> _messages = [
+    'Cooking...',
+    'Brewing coffee...',
+    'Dusting off the pixels...',
+    'Aligning the stars...',
+    'Feeding the hamsters...',
+    'Loading your awesomeness...',
+    'Reticulating splines...',
+    'Warming up the engines...',
+    'Searching across the stars...',
+    'Preparing your experience...',
+  ];
+  int _index = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (mounted) {
+        setState(() {
+          _index = (_index + 1) % _messages.length;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 20),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 500),
+            transitionBuilder: (Widget child, Animation<double> animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0.0, 0.5),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
+                ),
+              );
+            },
+            child: Text(
+              _messages[_index],
+              key: ValueKey<int>(_index),
+              style: GoogleFonts.gabarito(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: Theme.of(context).colorScheme.outline,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

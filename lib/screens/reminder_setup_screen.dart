@@ -180,7 +180,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
             await flutterLocalNotificationsPlugin.zonedSchedule(
               habitId.hashCode + i,
               'Time to $habitName!',
-              'Remember you want to become ${widget.habitGoal}',
+              'Remember? You wanted to become ${widget.habitGoal}.',
               scheduledDate,
               notificationDetails,
               androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
