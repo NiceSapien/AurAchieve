@@ -1109,10 +1109,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (context) => ShopPage(
-                      apiService: _apiService,
-                      currentAura: aura,
-                    ),
+                    builder: (context) =>
+                        ShopPage(apiService: _apiService, currentAura: aura),
                   ),
                 );
               },

@@ -286,13 +286,13 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     final key = '${habitId}_$type';
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('ignored_suggestion_$key', true);
-    
+
     if (mounted) {
       setState(() {
         _ignoredSuggestions.add(key);
         _stalledHabit = null;
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -603,12 +603,12 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
           habit['completedDays'] = prevDays;
           _completedIndex = null;
         });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(
-          content: Text('Failed to update: $e'),
-          behavior: SnackBarBehavior.floating,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _updating = false);
@@ -1003,21 +1003,33 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                               onRefresh: _loadHabits,
                               child: ListView(
                                 physics: const AlwaysScrollableScrollPhysics(),
-                                padding: const EdgeInsets.fromLTRB(0, 12, 0, 120),
+                                padding: const EdgeInsets.fromLTRB(
+                                  0,
+                                  12,
+                                  0,
+                                  120,
+                                ),
                                 children: [
                                   if (_stalledHabit != null) ...[
                                     Container(
-                                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                                      margin: const EdgeInsets.fromLTRB(
+                                        16,
+                                        0,
+                                        16,
+                                        24,
+                                      ),
                                       padding: const EdgeInsets.all(16),
                                       decoration: BoxDecoration(
                                         color: scheme.surfaceContainer,
                                         borderRadius: BorderRadius.circular(16),
                                         border: Border.all(
-                                          color: scheme.outlineVariant.withOpacity(0.5),
+                                          color: scheme.outlineVariant
+                                              .withOpacity(0.5),
                                         ),
                                       ),
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Row(
                                             children: [
@@ -1038,14 +1050,20 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                                                 ),
                                               ),
                                               IconButton(
-                                                icon: const Icon(Icons.close, size: 18),
-                                                onPressed: () =>
-                                                    setState(() => _stalledHabit = null),
+                                                icon: const Icon(
+                                                  Icons.close,
+                                                  size: 18,
+                                                ),
+                                                onPressed: () => setState(
+                                                  () => _stalledHabit = null,
+                                                ),
                                                 padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
+                                                constraints:
+                                                    const BoxConstraints(),
                                                 style: IconButton.styleFrom(
                                                   tapTargetSize:
-                                                      MaterialTapTargetSize.shrinkWrap,
+                                                      MaterialTapTargetSize
+                                                          .shrinkWrap,
                                                 ),
                                               ),
                                             ],
@@ -1092,17 +1110,24 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                                                             '')
                                                         .toString();
                                                 if (id.isNotEmpty) {
-                                                  _ignoreSuggestion(id, _suggestionType);
+                                                  _ignoreSuggestion(
+                                                    id,
+                                                    _suggestionType,
+                                                  );
                                                 }
                                               },
                                               icon: const Icon(
                                                 Icons.visibility_off_outlined,
                                                 size: 16,
                                               ),
-                                              label: const Text("Don't show again"),
+                                              label: const Text(
+                                                "Don't show again",
+                                              ),
                                               style: TextButton.styleFrom(
                                                 foregroundColor: scheme.outline,
-                                                textStyle: GoogleFonts.gabarito(fontSize: 12),
+                                                textStyle: GoogleFonts.gabarito(
+                                                  fontSize: 12,
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -1111,12 +1136,16 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                                     ),
                                   ],
                                   ...goodHabits.map(
-                                    (h) => _habitCard(h, _habits.indexOf(h), scheme),
+                                    (h) => _habitCard(
+                                      h,
+                                      _habits.indexOf(h),
+                                      scheme,
+                                    ),
                                   ),
                                 ],
                               ),
                             ),
-                      
+
                       // Bad Habits Tab
                       badHabits.isEmpty
                           ? Center(
@@ -1153,10 +1182,19 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                               onRefresh: _loadHabits,
                               child: ListView(
                                 physics: const AlwaysScrollableScrollPhysics(),
-                                padding: const EdgeInsets.fromLTRB(0, 12, 0, 120),
+                                padding: const EdgeInsets.fromLTRB(
+                                  0,
+                                  12,
+                                  0,
+                                  120,
+                                ),
                                 children: [
                                   ...badHabits.map(
-                                    (h) => _habitCard(h, _habits.indexOf(h), scheme),
+                                    (h) => _habitCard(
+                                      h,
+                                      _habits.indexOf(h),
+                                      scheme,
+                                    ),
                                   ),
                                 ],
                               ),
