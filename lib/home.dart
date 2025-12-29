@@ -21,6 +21,7 @@ import 'study_planner.dart';
 import 'screens/extended_task_list.dart';
 import 'habits.dart';
 import 'widgets/habit_details_sheet.dart';
+import 'shop.dart';
 import 'settings.dart';
 
 enum AuraHistoryView { day, month, year }
@@ -1099,6 +1100,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
           centerTitle: true,
           actions: [
+            IconButton(
+              icon: Icon(
+                Icons.storefront_outlined,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              tooltip: 'Shop',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => ShopPage(
+                      apiService: _apiService,
+                      currentAura: aura,
+                    ),
+                  ),
+                );
+              },
+            ),
             IconButton(
               icon: Icon(
                 Icons.settings_outlined,

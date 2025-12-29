@@ -241,7 +241,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 SwitchListTile.adaptive(
                   contentPadding: tilePadding,
                   title: const Text('Smart Suggestions'),
-                  subtitle: const Text('Show suggestions for stalled habits'),
+                  subtitle: const Text('Show suggestions for habits'),
                   value: _smartSuggestions,
                   onChanged: (v) {
                     setState(() => _smartSuggestions = v);

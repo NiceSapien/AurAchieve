@@ -321,35 +321,97 @@ class _HabitSetupState extends State<HabitSetup> {
           else
             Padding(
               padding: const EdgeInsets.all(24.0),
-              child: SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: FilledButton(
-                  onPressed: _submitting
-                      ? null
-                      : (isComplete
-                            ? (_isEditing ? _saveHabit : _continueToReminders)
-                            : null),
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Text(
-                          _isEditing ? "Save" : "Continue",
-                          style: GoogleFonts.gabarito(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_isEditing)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 56,
+                        child: OutlinedButton.icon(
+                          onPressed: _submitting ? null : _editReminders,
+                          icon: const Icon(Icons.alarm),
+                          label: Text(
+                            "Edit Reminders",
+                            style: GoogleFonts.gabarito(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                ),
+                      ),
+                    ),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: FilledButton(
+                      onPressed: _submitting
+                          ? null
+                          : (isComplete
+                                ? (_isEditing
+                                      ? _saveHabit
+                                      : _continueToReminders)
+                                : null),
+                      child: _submitting
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              _isEditing ? "Save" : "Continue",
+                              style: GoogleFonts.gabarito(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                    ),
+                  ),
+                ],
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  void _editReminders() async {
+    if (_values.any((v) => _placeholders.contains(v) || v.trim().isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please complete the sentence first.')),
+      );
+      return;
+    }
+
+    final id =
+        (widget.initialHabit![r'$id'] ??
+                widget.initialHabit!['id'] ??
+                widget.initialHabit!['habitId'])
+            .toString();
+
+    List<String>? currentReminders;
+    if (widget.initialHabit!['habitReminder'] is List) {
+      currentReminders = List<String>.from(
+        widget.initialHabit!['habitReminder'].map((e) => e.toString()),
+      );
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ReminderSetupScreen(
+          apiService: widget.apiService,
+          habitName: _values[0].trim(),
+          habitCue: _values[1].trim(),
+          habitGoal: _values[2].trim(),
+          existingHabitId: id,
+          initialReminders: currentReminders,
+        ),
       ),
     );
   }

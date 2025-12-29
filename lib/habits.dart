@@ -8,6 +8,7 @@ import 'widgets/habit_details_sheet.dart';
 import 'widgets/dynamic_color_svg.dart';
 import 'dart:convert';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HabitsPage extends StatefulWidget {
   final ApiService apiService;
@@ -45,10 +46,14 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   late AnimationController _fabController;
   late Animation<double> _fabAnimation;
   Map<String, dynamic>? _stalledHabit;
+  String _suggestionType = 'stalled';
+  Set<String> _ignoredSuggestions = {};
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _fabController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
@@ -57,6 +62,8 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
       parent: _fabController,
       curve: Curves.easeOut,
     );
+
+    _loadIgnoredSuggestions();
 
     _bounceController =
         AnimationController(
@@ -221,6 +228,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _tabController.dispose();
     _fabController.dispose();
     _bounceController.dispose();
     _holdController?.dispose();
@@ -259,6 +267,59 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     return <String>[];
   }
 
+  Future<void> _loadIgnoredSuggestions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keys = prefs.getKeys();
+    final ignored = keys
+        .where((k) => k.startsWith('ignored_suggestion_'))
+        .map((k) => k.replaceFirst('ignored_suggestion_', ''))
+        .toSet();
+    if (mounted) {
+      setState(() {
+        _ignoredSuggestions = ignored;
+      });
+      _checkForStalledHabits();
+    }
+  }
+
+  Future<void> _ignoreSuggestion(String habitId, String type) async {
+    final key = '${habitId}_$type';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('ignored_suggestion_$key', true);
+    
+    if (mounted) {
+      setState(() {
+        _ignoredSuggestions.add(key);
+        _stalledHabit = null;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Won't give this suggestion again",
+            style: GoogleFonts.gabarito(
+              color: Theme.of(context).colorScheme.onInverseSurface,
+            ),
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Theme.of(context).colorScheme.inverseSurface,
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () async {
+              await prefs.remove('ignored_suggestion_$key');
+              if (mounted) {
+                setState(() {
+                  _ignoredSuggestions.remove(key);
+                });
+                _checkForStalledHabits();
+              }
+            },
+          ),
+        ),
+      );
+    }
+  }
+
   void _checkForStalledHabits() {
     if (!widget.smartSuggestionsEnabled) {
       if (_stalledHabit != null) {
@@ -271,8 +332,12 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     final now = DateTime.now();
     final threeDaysAgo = now.subtract(const Duration(days: 3));
 
+    // Priority 1: Stalled habits
     for (final h in _habits) {
       if (h['type'] == 'bad') continue;
+
+      final id = (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '').toString();
+      if (_ignoredSuggestions.contains('${id}_stalled')) continue;
 
       final completedDays = _normalizeCompletedDays(h['completedDays']);
       DateTime? lastDate;
@@ -295,7 +360,30 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
       }
 
       if (lastDate != null && lastDate.isBefore(threeDaysAgo)) {
-        setState(() => _stalledHabit = h);
+        setState(() {
+          _stalledHabit = h;
+          _suggestionType = 'stalled';
+        });
+        return;
+      }
+    }
+
+    // Priority 2: Remove reminders for established habits
+    for (final h in _habits) {
+      if (h['type'] == 'bad') continue;
+
+      final id = (h[r'$id'] ?? h['id'] ?? h['habitId'] ?? '').toString();
+      if (_ignoredSuggestions.contains('${id}_remove_reminders')) continue;
+
+      final completedTimes = h['completedTimes'] as int? ?? 0;
+      final reminders = h['habitReminder'];
+      final hasReminders = reminders is List && reminders.isNotEmpty;
+
+      if (completedTimes >= 30 && hasReminders) {
+        setState(() {
+          _stalledHabit = h;
+          _suggestionType = 'remove_reminders';
+        });
         return;
       }
     }
@@ -440,7 +528,27 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         if (resp.containsKey('aura') && widget.onAuraChange != null) {
           final val = resp['aura'];
           if (val is num) {
-            widget.onAuraChange!(val.toInt());
+            final newAura = val.toInt();
+            final oldAura = widget.currentAura ?? newAura;
+            final diff = newAura - oldAura;
+            if (diff != 0 && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    diff > 0
+                        ? 'You gained $diff Aura!'
+                        : 'You lost ${diff.abs()} Aura...',
+                    style: GoogleFonts.gabarito(
+                      color: Theme.of(context).colorScheme.onInverseSurface,
+                    ),
+                  ),
+                  backgroundColor: Theme.of(context).colorScheme.inverseSurface,
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+            widget.onAuraChange!(newAura);
           }
         }
       } else {
@@ -464,7 +572,27 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         if (resp.containsKey('aura') && widget.onAuraChange != null) {
           final val = resp['aura'];
           if (val is num) {
-            widget.onAuraChange!(val.toInt());
+            final newAura = val.toInt();
+            final oldAura = widget.currentAura ?? newAura;
+            final diff = newAura - oldAura;
+            if (diff != 0 && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    diff > 0
+                        ? 'You gained $diff Aura!'
+                        : 'You lost ${diff.abs()} Aura...',
+                    style: GoogleFonts.gabarito(
+                      color: Theme.of(context).colorScheme.onInverseSurface,
+                    ),
+                  ),
+                  backgroundColor: Theme.of(context).colorScheme.inverseSurface,
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+            widget.onAuraChange!(newAura);
           }
         }
       }
@@ -477,7 +605,10 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         });
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+        ).showSnackBar(SnackBar(
+          content: Text('Failed to update: $e'),
+          behavior: SnackBarBehavior.floating,
+        ));
       }
     } finally {
       if (mounted) setState(() => _updating = false);
@@ -816,211 +947,225 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     final badHabits = _habits.where((h) => h['type'] == 'bad').toList();
 
     return Scaffold(
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _habits.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  DynamicColorSvg(
-                    assetName: 'assets/img/habit.svg',
-                    color: scheme.primary,
-                    width: 240,
-                    height: 240,
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    'No habits yet',
-                    style: GoogleFonts.gabarito(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: scheme.outline,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Add a habit from the button below.',
-                    style: GoogleFonts.gabarito(
-                      fontSize: 14,
-                      color: scheme.outline.withOpacity(0.7),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : RefreshIndicator(
-              onRefresh: _loadHabits,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(0, 12, 0, 120),
-                children: [
-                  if (_stalledHabit != null) ...[
-                    Container(
-                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: scheme.surfaceContainer,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: scheme.outlineVariant.withOpacity(0.5),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.lightbulb_outline_rounded,
-                                color: scheme.primary,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Smart Suggestion',
-                                  style: GoogleFonts.gabarito(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: scheme.primary,
-                                  ),
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.close, size: 18),
-                                onPressed: () =>
-                                    setState(() => _stalledHabit = null),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                style: IconButton.styleFrom(
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Is "${_stalledHabit!['habitName'] ?? 'your habit'}" still working for you?',
-                            style: GoogleFonts.gabarito(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: scheme.onSurface,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            "You haven't completed this habit in a while. Would you like to make changes?",
-                            style: GoogleFonts.gabarito(
-                              fontSize: 14,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: () {
-                                    final h = _stalledHabit!;
-                                    setState(() => _stalledHabit = null);
-                                    _showHabitDetails(h);
-                                  },
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 0,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                  child: const Text('Edit Habit'),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: FilledButton(
-                                  onPressed: () =>
-                                      setState(() => _stalledHabit = null),
-                                  style: FilledButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 0,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                  child: const Text('Keep Going'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  if (goodHabits.isNotEmpty) ...[
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            "Good Habits",
-                            style: GoogleFonts.gabarito(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: scheme.onSurface,
-                            ),
-                          ),
-                          Icon(
-                            Icons.check_circle_outline_rounded,
-                            color: scheme.primary,
-                            size: 24,
-                          ),
-                        ],
-                      ),
-                    ),
-                    ...goodHabits.map(
-                      (h) => _habitCard(h, _habits.indexOf(h), scheme),
-                    ),
-                  ],
-                  if (badHabits.isNotEmpty) ...[
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            "Bad Habits",
-                            style: GoogleFonts.gabarito(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: scheme.onSurface,
-                            ),
-                          ),
-                          Icon(
-                            Icons.warning_amber_rounded,
-                            color: scheme.error,
-                            size: 24,
-                          ),
-                        ],
-                      ),
-                    ),
-                    ...badHabits.map(
-                      (h) => _habitCard(h, _habits.indexOf(h), scheme),
-                    ),
-                  ],
-                ],
-              ),
+      body: Column(
+        children: [
+          Container(
+            color: scheme.surface,
+            child: TabBar(
+              controller: _tabController,
+              labelStyle: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
+              unselectedLabelStyle: GoogleFonts.gabarito(),
+              tabs: const [
+                Tab(text: 'Good Habits'),
+                Tab(text: 'Bad Habits'),
+              ],
             ),
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : TabBarView(
+                    controller: _tabController,
+                    children: [
+                      // Good Habits Tab
+                      goodHabits.isEmpty && _stalledHabit == null
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  DynamicColorSvg(
+                                    assetName: 'assets/img/habit.svg',
+                                    color: scheme.primary,
+                                    width: 240,
+                                    height: 240,
+                                  ),
+                                  const SizedBox(height: 20),
+                                  Text(
+                                    'No good habits yet',
+                                    style: GoogleFonts.gabarito(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w600,
+                                      color: scheme.outline,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Add a habit from the button below.',
+                                    style: GoogleFonts.gabarito(
+                                      fontSize: 14,
+                                      color: scheme.outline.withOpacity(0.7),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : RefreshIndicator(
+                              onRefresh: _loadHabits,
+                              child: ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                padding: const EdgeInsets.fromLTRB(0, 12, 0, 120),
+                                children: [
+                                  if (_stalledHabit != null) ...[
+                                    Container(
+                                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: scheme.surfaceContainer,
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(
+                                          color: scheme.outlineVariant.withOpacity(0.5),
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                Icons.lightbulb_outline_rounded,
+                                                color: scheme.primary,
+                                                size: 20,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  'Smart Suggestion',
+                                                  style: GoogleFonts.gabarito(
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: scheme.primary,
+                                                  ),
+                                                ),
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(Icons.close, size: 18),
+                                                onPressed: () =>
+                                                    setState(() => _stalledHabit = null),
+                                                padding: EdgeInsets.zero,
+                                                constraints: const BoxConstraints(),
+                                                style: IconButton.styleFrom(
+                                                  tapTargetSize:
+                                                      MaterialTapTargetSize.shrinkWrap,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            _suggestionType == 'stalled'
+                                                ? 'Is "${_stalledHabit!['habitName'] ?? 'your habit'}" still working for you?'
+                                                : 'Try removing some reminders',
+                                            style: GoogleFonts.gabarito(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                              color: scheme.onSurface,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            _suggestionType == 'stalled'
+                                                ? "You haven't completed this habit in a while. Would you like to make changes?"
+                                                : "You've completed this habit ${_stalledHabit!['completedTimes']} times. Why not try removing reminders to see if it sticks?",
+                                            style: GoogleFonts.gabarito(
+                                              fontSize: 14,
+                                              color: scheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                          Transform.scale(
+                                            scale: 1.10,
+                                            child: _habitCard(
+                                              _stalledHabit!,
+                                              _habits.indexOf(_stalledHabit!),
+                                              scheme,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Align(
+                                            alignment: Alignment.centerRight,
+                                            child: TextButton.icon(
+                                              onPressed: () {
+                                                final id =
+                                                    (_stalledHabit![r'$id'] ??
+                                                            _stalledHabit!['id'] ??
+                                                            _stalledHabit!['habitId'] ??
+                                                            '')
+                                                        .toString();
+                                                if (id.isNotEmpty) {
+                                                  _ignoreSuggestion(id, _suggestionType);
+                                                }
+                                              },
+                                              icon: const Icon(
+                                                Icons.visibility_off_outlined,
+                                                size: 16,
+                                              ),
+                                              label: const Text("Don't show again"),
+                                              style: TextButton.styleFrom(
+                                                foregroundColor: scheme.outline,
+                                                textStyle: GoogleFonts.gabarito(fontSize: 12),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                  ...goodHabits.map(
+                                    (h) => _habitCard(h, _habits.indexOf(h), scheme),
+                                  ),
+                                ],
+                              ),
+                            ),
+                      
+                      // Bad Habits Tab
+                      badHabits.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  DynamicColorSvg(
+                                    assetName: 'assets/img/bad_habit.svg',
+                                    color: scheme.error,
+                                    width: 240,
+                                    height: 240,
+                                  ),
+                                  const SizedBox(height: 20),
+                                  Text(
+                                    'No bad habits',
+                                    style: GoogleFonts.gabarito(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w600,
+                                      color: scheme.outline,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Great job! Or add one if you need to break it.',
+                                    style: GoogleFonts.gabarito(
+                                      fontSize: 14,
+                                      color: scheme.outline.withOpacity(0.7),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : RefreshIndicator(
+                              onRefresh: _loadHabits,
+                              child: ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                padding: const EdgeInsets.fromLTRB(0, 12, 0, 120),
+                                children: [
+                                  ...badHabits.map(
+                                    (h) => _habitCard(h, _habits.indexOf(h), scheme),
+                                  ),
+                                ],
+                              ),
+                            ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
