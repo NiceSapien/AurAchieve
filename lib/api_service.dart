@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:appwrite/appwrite.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -12,7 +13,7 @@ dynamic _parseJson(String jsonString) {
 
 class AppConfig {
   static const String defaultBaseUrl =
-      'https://auraascend-fgf4aqf5gubgacb3.centralindia-01.azurewebsites.net';
+      'https://ubiquitous-waddle-557rj9965pwh7q7g-3000.app.github.dev';
   static String baseUrl = defaultBaseUrl;
 
   static const String defaultAppwriteEndpoint =
@@ -80,9 +81,12 @@ class AppConfig {
 
 class ApiService {
   final Account account;
+  late final Storage storage;
   final _storage = const FlutterSecureStorage();
 
-  ApiService({required this.account});
+  ApiService({required this.account}) {
+    storage = Storage(account.client);
+  }
 
   Future<String?> getJwtToken({bool forceRefresh = false}) async {
     if (forceRefresh) {
@@ -177,20 +181,6 @@ class ApiService {
     return const [];
   }
 
-  Map<String, dynamic>? _asMap(dynamic v) {
-    if (v is Map) {
-      final inner = v['data'];
-      if (inner is Map) return Map<String, dynamic>.from(inner);
-      return Map<String, dynamic>.from(v);
-    }
-    if (v is String && v.trim().isNotEmpty) {
-      try {
-        final decoded = jsonDecode(v);
-        if (decoded is Map) return Map<String, dynamic>.from(decoded);
-      } catch (_) {}
-    }
-    return null;
-  }
 
   Future<Map<String, dynamic>> getUserProfile() async {
     final response = await _performRequest('GET', '/api/user/profile');
@@ -198,17 +188,146 @@ class ApiService {
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else {
-      print(
-        'Failed to load user profile: ${response.statusCode} ${response.body}',
-      );
-      throw Exception('Failed to load user profile: ${response.body}');
+      throw Exception('Failed to load profile');
     }
   }
 
-  Future<List<dynamic>> getTasks() async {
+  static const List<String> reservedUsernames = [
+    'privacy',
+    'index',
+    'terms',
+    'help',
+    'support',
+    'admin',
+    'root',
+    'api',
+    'dashboard',
+    'login',
+    'register',
+    'auth',
+    'nicesapien',
+  ];
+
+  bool isUsernameReserved(String username) {
+    return reservedUsernames.contains(username.toLowerCase());
+  }
+
+  Future<void> uploadProfilePicture(File file, String username) async {
+    try {
+      try {
+        await storage.deleteFile(
+          bucketId: '69538a24001337545e6b',
+          fileId: username,
+        );
+      } catch (_) {}
+
+      await storage.createFile(
+        bucketId: '69538a24001337545e6b',
+        fileId: username,
+        file: InputFile.fromPath(path: file.path, filename: '$username.webp'),
+      );
+    } catch (e) {
+      throw Exception('Failed to upload profile picture: $e');
+    }
+  }
+
+  Future<void> updateName(String name) async {
+    try {
+      await account.updateName(name: name);
+    } catch (e) {
+      throw Exception('Failed to update name: $e');
+    }
+  }
+
+  Future<void> claimAuraPage(String username) async {
+    if (isUsernameReserved(username)) {
+      throw Exception('Username "$username" is reserved and cannot be used.');
+    }
+    final response = await _performRequest(
+      'POST',
+      '/api/aura-page',
+      body: jsonEncode({'username': username, 'theme': '', 'enable': true}),
+    );
+
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception('Failed to claim Aura Page: ${response.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getAuraPage() async {
+    final response = await _performRequest('GET', '/api/aura-page');
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else if (response.statusCode == 404) {
+      return {};
+    } else {
+      throw Exception('Failed to load Aura Page: ${response.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> updateAuraTheme(String theme) async {
+    final response = await _performRequest(
+      'PATCH',
+      '/api/aura-page/theme',
+      body: jsonEncode({'theme': theme}),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else if (response.statusCode == 402) {
+      throw Exception('Insufficient Aura');
+    } else {
+      throw Exception('Failed to update theme: ${response.body}');
+    }
+  }
+
+  Future<void> updateAuraPage({
+    String? username,
+    bool? enable,
+    String? theme,
+    String? bio,
+  }) async {
+    if (enable != null) {
+      final response = await _performRequest(
+        'PATCH',
+        '/api/aura-page/enable',
+        body: jsonEncode({'enable': enable}),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to update enable status: ${response.body}');
+      }
+    }
+
+    if (bio != null) {
+      final response = await _performRequest(
+        'PATCH',
+        '/api/aura-page/bio',
+        body: jsonEncode({'bio': bio}),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to update bio: ${response.body}');
+      }
+    }
+
+    
+    
+  }
+
+  Future<Map<String, dynamic>> getTasks() async {
     final response = await _performRequest('GET', '/api/tasks');
     if (response.statusCode == 200) {
-      return (await compute(_parseJson, response.body)) as List<dynamic>;
+      final decoded = await compute(_parseJson, response.body);
+      if (decoded is List) {
+        return {'tasks': decoded, 'username': null};
+      } else if (decoded is Map) {
+        return {
+          'tasks': _asList(decoded['tasks'] ?? []),
+          'username': decoded['username'],
+        };
+      }
+      return {'tasks': [], 'username': null};
     } else {
       throw Exception('Failed to load tasks: ${response.body}');
     }
@@ -750,19 +869,12 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> getTasksAndHabits() async {
-    if (AppConfig.baseUrl != AppConfig.defaultBaseUrl) {
-      final resp = await _performRequest('GET', '/api/tasks');
-      if (resp.statusCode < 200 || resp.statusCode >= 300) {
-        throw Exception(
-          'Failed to fetch tasks: ${resp.statusCode} ${resp.body}',
-        );
-      }
+    final resp = await _performRequest('GET', '/api/tasks');
+
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
       final data = await compute(_parseJson, resp.body);
 
-      if (data is Map<String, dynamic> &&
-          (data.containsKey('tasks') ||
-              data.containsKey('habits') ||
-              data.containsKey('badHabits'))) {
+      if (data is Map<String, dynamic>) {
         return {
           'tasks': (data['tasks'] as List?) ?? [],
           'habits': (data['habits'] as List?) ?? [],
@@ -775,36 +887,14 @@ class ApiService {
           'validationCount': data['validationCount'],
           'lastValidationResetDate': data['lastValidationResetDate'],
           'quote': data['quote'],
+          'username': data['username'],
         };
-      }
-
-      final tasks = data is List ? data : _extractList(data);
-      return {
-        'tasks': tasks,
-        'habits': const [],
-        'badHabits': const [],
-        'studyPlan': null,
-        'userId': null,
-        'name': null,
-        'email': null,
-        'aura': null,
-        'validationCount': null,
-        'lastValidationResetDate': null,
-        'quote': null,
-      };
-    }
-
-    final resp = await _performRequest(
-      'GET',
-      '',
-      overrideUrl: AppConfig.baseUrl + '/api/tasks',
-    );
-    if (resp.statusCode < 200 || resp.statusCode >= 300) {
-      if (resp.statusCode == 404) {
+      } else if (data is List) {
+        
         return {
-          'tasks': [],
-          'habits': [],
-          'badHabits': [],
+          'tasks': data,
+          'habits': const [],
+          'badHabits': const [],
           'studyPlan': null,
           'userId': null,
           'name': null,
@@ -813,24 +903,12 @@ class ApiService {
           'validationCount': null,
           'lastValidationResetDate': null,
           'quote': null,
+          'username': null,
         };
       }
-      throw Exception('Failed to fetch tasks: ${resp.statusCode} ${resp.body}');
     }
-    final root = await compute(_parseJson, resp.body);
-    return {
-      'tasks': (root['tasks'] as List?) ?? const [],
-      'habits': (root['habits'] as List?) ?? const [],
-      'badHabits': (root['badHabits'] as List?) ?? const [],
-      'studyPlan': root['studyPlan'],
-      'userId': root['userId'],
-      'name': root['name'],
-      'email': root['email'],
-      'aura': root['aura'],
-      'validationCount': root['validationCount'],
-      'lastValidationResetDate': root['lastValidationResetDate'],
-      'quote': root['quote'],
-    };
+
+    throw Exception('Failed to fetch tasks: ${resp.statusCode} ${resp.body}');
   }
 
   Future<Map<String, String>> _getHeaders({bool forceRefresh = false}) async {
@@ -841,39 +919,7 @@ class ApiService {
     };
   }
 
-  List<dynamic> _extractList(dynamic value) {
-    if (value == null) return [];
-    if (value is List) return value;
-    if (value is Map) {
-      final inner =
-          value['data'] ??
-          value['items'] ??
-          value['documents'] ??
-          value['list'];
-      if (inner is List) return inner;
-      if (inner is String) {
-        try {
-          final decoded = jsonDecode(inner);
-          if (decoded is List) return decoded;
-        } catch (_) {}
-      }
-    }
-    if (value is String) {
-      try {
-        final decoded = jsonDecode(value);
-        if (decoded is List) return decoded;
-        if (decoded is Map) {
-          final inner =
-              decoded['data'] ??
-              decoded['items'] ??
-              decoded['documents'] ??
-              decoded['list'];
-          if (inner is List) return inner;
-        }
-      } catch (_) {}
-    }
-    return [];
-  }
+
 
   Future<void> createProfile(String name, String email) async {
     final resp = await _performRequest(

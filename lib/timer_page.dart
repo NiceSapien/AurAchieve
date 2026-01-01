@@ -65,14 +65,14 @@ class _TimerPageState extends State<TimerPage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _lastTickTime = DateTime.now();
       if (_isRunning && !_isPaused) {
-        // Ensure timer is running
+         
         _timer?.cancel();
         _timer = Timer.periodic(const Duration(milliseconds: 16), _onTick);
       }
     } else if (state == AppLifecycleState.paused) {
-      // We don't cancel the timer here to allow it to potentially run a bit longer
-      // or rely on the OS to suspend it.
-      // When we resume, we'll calculate the diff.
+       
+       
+       
     }
   }
 

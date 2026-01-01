@@ -5,11 +5,13 @@ import 'api_service.dart';
 class ShopPage extends StatefulWidget {
   final ApiService apiService;
   final int currentAura;
+  final Function(int) onAuraSpent;
 
   const ShopPage({
     super.key,
     required this.apiService,
     required this.currentAura,
+    required this.onAuraSpent,
   });
 
   @override
@@ -17,9 +19,95 @@ class ShopPage extends StatefulWidget {
 }
 
 class _ShopPageState extends State<ShopPage> {
+  List<String> _purchasedThemes = [];
+  String? _currentTheme;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchAuraPageData();
+  }
+
+  Future<void> _fetchAuraPageData() async {
+    try {
+      final data = await widget.apiService.getAuraPage();
+      if (mounted) {
+        setState(() {
+          _purchasedThemes = List<String>.from(data['purchasedThemes'] ?? []);
+          _currentTheme = data['theme'];
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _purchaseOrEquipTheme(String themeKey, int cost) async {
+    final isOwned = _purchasedThemes.contains(themeKey);
+    final isEquipped = _currentTheme == themeKey;
+
+    if (isEquipped) return;
+
+    if (isOwned) {
+      
+      try {
+        await widget.apiService.updateAuraTheme(themeKey);
+        if (mounted) {
+          setState(() => _currentTheme = themeKey);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Theme equipped!')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to equip theme: $e')),
+          );
+        }
+      }
+    } else {
+      
+      if (widget.currentAura < cost) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Insufficient Aura!')),
+        );
+        return;
+      }
+
+      try {
+        final result = await widget.apiService.updateAuraTheme(themeKey);
+        if (mounted) {
+          setState(() {
+            _purchasedThemes =
+                List<String>.from(result['purchasedThemes'] ?? []);
+            _currentTheme = result['theme'];
+          });
+          widget.onAuraSpent(cost);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Theme purchased and equipped!')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to purchase theme: $e')),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -28,6 +116,33 @@ class _ShopPageState extends State<ShopPage> {
           style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
+        actions: [
+          Container(
+            margin: const EdgeInsets.only(right: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.auto_awesome_rounded,
+                  size: 16,
+                  color: scheme.onPrimaryContainer,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '${widget.currentAura}',
+                  style: GoogleFonts.gabarito(
+                    fontWeight: FontWeight.bold,
+                    color: scheme.onPrimaryContainer,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -50,6 +165,14 @@ class _ShopPageState extends State<ShopPage> {
             color: Colors.cyan,
             maxQuantity: 5,
             currentQuantity: 0,
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Coming soon!'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
           ),
           const SizedBox(height: 32),
           Text(
@@ -61,24 +184,69 @@ class _ShopPageState extends State<ShopPage> {
             ),
           ),
           const SizedBox(height: 16),
-          _buildShopItem(
+          _buildThemeItem(
+            context,
+            title: 'Peace',
+            description: 'Japanese cherry blossom pink theme.',
+            cost: 250,
+            icon: Icons.spa_rounded,
+            color: Colors.pinkAccent,
+            themeKey: 'peace',
+          ),
+          _buildThemeItem(
+            context,
+            title: 'Midnight',
+            description: 'Deep purple and starry night theme.',
+            cost: 500,
+            icon: Icons.nightlight_round,
+            color: Colors.deepPurple,
+            themeKey: 'midnight',
+          ),
+          _buildThemeItem(
             context,
             title: 'Hacker',
             description: 'Green terminal vibes for your aura page.',
-            cost: 500,
+            cost: 750,
             icon: Icons.terminal_rounded,
             color: Colors.green,
+            themeKey: 'hacker',
           ),
-          _buildShopItem(
+          _buildThemeItem(
             context,
-            title: 'Peace',
-            description: 'Calm blue and white aesthetics.',
-            cost: 500,
-            icon: Icons.spa_rounded,
-            color: Colors.blue,
+            title: 'Gold',
+            description: 'Luxurious and elegant theme.',
+            cost: 750,
+            icon: Icons.monetization_on_rounded,
+            color: Colors.amber,
+            themeKey: 'gold',
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildThemeItem(
+    BuildContext context, {
+    required String title,
+    required String description,
+    required int cost,
+    required IconData icon,
+    required Color color,
+    required String themeKey,
+  }) {
+    final isOwned = _purchasedThemes.contains(themeKey);
+    final isEquipped = _currentTheme == themeKey;
+
+    return _buildShopItem(
+      context,
+      title: title,
+      description: description,
+      cost: cost,
+      icon: icon,
+      color: color,
+      isOwned: isOwned,
+      isEquipped: isEquipped,
+      onTap: () => _purchaseOrEquipTheme(themeKey, cost),
     );
   }
 
@@ -91,33 +259,37 @@ class _ShopPageState extends State<ShopPage> {
     required Color color,
     int? maxQuantity,
     int currentQuantity = 0,
+    bool isOwned = false,
+    bool isEquipped = false,
+    VoidCallback? onTap,
   }) {
     final scheme = Theme.of(context).colorScheme;
     final isMaxedOut = maxQuantity != null && currentQuantity >= maxQuantity;
     final canAfford = widget.currentAura >= cost && !isMaxedOut;
+
+    
+    
+    final isTheme = maxQuantity == null;
+    final canInteract = isTheme ? true : canAfford;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: scheme.outlineVariant.withOpacity(0.3)),
+        border: Border.all(
+          color: isEquipped
+              ? scheme.primary
+              : scheme.outlineVariant.withOpacity(0.3),
+          width: isEquipped ? 2 : 1,
+        ),
       ),
       child: Material(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(24),
         child: InkWell(
           borderRadius: BorderRadius.circular(24),
-          onTap: canAfford
-              ? () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Coming soon!'),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              : null,
+          onTap: canInteract ? onTap : null,
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Row(
@@ -167,6 +339,27 @@ class _ShopPageState extends State<ShopPage> {
                               ),
                             ),
                           ],
+                          if (isEquipped) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: scheme.primaryContainer,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                'EQUIPPED',
+                                style: GoogleFonts.gabarito(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: scheme.onPrimaryContainer,
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 4),
@@ -190,9 +383,13 @@ class _ShopPageState extends State<ShopPage> {
                   decoration: BoxDecoration(
                     color: isMaxedOut
                         ? scheme.surfaceContainerHighest
-                        : (canAfford
-                              ? scheme.primaryContainer
-                              : scheme.surfaceContainerHighest),
+                        : (isOwned
+                            ? (isEquipped
+                                ? scheme.surfaceContainerHighest
+                                : scheme.primaryContainer)
+                            : (canAfford
+                                ? scheme.primaryContainer
+                                : scheme.surfaceContainerHighest)),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(
@@ -205,6 +402,17 @@ class _ShopPageState extends State<ShopPage> {
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
                             color: scheme.onSurfaceVariant,
+                          ),
+                        )
+                      else if (isOwned)
+                        Text(
+                          isEquipped ? 'Equipped' : 'Equip',
+                          style: GoogleFonts.gabarito(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: isEquipped
+                                ? scheme.onSurfaceVariant
+                                : scheme.onPrimaryContainer,
                           ),
                         )
                       else ...[

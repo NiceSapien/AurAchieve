@@ -9,6 +9,25 @@ import 'widgets/dynamic_color_svg.dart';
 import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:math';
+
+class SmartTip {
+  final String id;
+  final String title;
+  final String content;
+  final String? expandedContent;
+  final String type;  
+  final String targetTab;  
+
+  const SmartTip({
+    required this.id,
+    required this.title,
+    required this.content,
+    this.expandedContent,
+    required this.type,
+    this.targetTab = 'any',
+  });
+}
 
 class HabitsPage extends StatefulWidget {
   final ApiService apiService;
@@ -49,6 +68,62 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   String _suggestionType = 'stalled';
   Set<String> _ignoredSuggestions = {};
   late TabController _tabController;
+
+  SmartTip? _activeTip;
+  bool _tipExpanded = false;
+
+  final List<SmartTip> _allTips = [
+    const SmartTip(
+      id: 'dyk_changes_invisible',
+      title: 'Did you know?',
+      content:
+          "Changes aren't visible each time you perform a habit. That's why habit tracking helps you feel like a change is happening! Each time that 'completed times' number increases, its a different kind of motivation boost!",
+      type: 'did_you_know',
+      targetTab: 'good',
+    ),
+    const SmartTip(
+      id: 'pt_bad_habit_guilt',
+      title: 'Pro tip',
+      content:
+          "Mark your bad habits as complete before performing them. This way, you'll feel the guilt of losing aura before doing it.",
+      expandedContent:
+          " And, you might end up in a scenario where you can't grab your phone and mark a bad habit as complete - so you might end up not doing it instead!",
+      type: 'pro_tip',
+      targetTab: 'bad',
+    ),
+    const SmartTip(
+      id: 'dyk_21_days',
+      title: 'Did you know?',
+      content:
+          "It takes about 21 days to form a new habit, but 90 days to make it a permanent lifestyle change. Keep going!",
+      type: 'did_you_know',
+      targetTab: 'good',
+    ),
+    const SmartTip(
+      id: 'pt_stacking',
+      title: 'Pro tip',
+      content:
+          "Try 'Habit Stacking'. Perform your new habit immediately after a current habit you already do every day.",
+      type: 'pro_tip',
+      targetTab: 'good',
+    ),
+    const SmartTip(
+      id: 'pt_environment',
+      title: 'Pro tip',
+      content:
+          "Design your environment for success. If you want to read more, put a book on your pillow.",
+      type: 'pro_tip',
+      targetTab: 'good',
+    ),
+    const SmartTip(
+      id: 'pt_slow_growth',
+      title: 'Pro tip',
+      content:
+          "Don't try to form too many habits at once. It can become too hard to manage. Success doesn't appear in a day or a week. Slowly work your way up over time.",
+      type: 'pro_tip',
+      targetTab: 'any',
+    ),
+  ];
 
   @override
   void initState() {
@@ -169,7 +244,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     for (final h in rawList) {
       if (h is! Map) continue;
       final m = Map<String, dynamic>.from(h);
-      // Ensure type is set if missing (default to good for legacy)
+       
       m['type'] ??= 'good';
 
       m['completedTimes'] = m['completedTimes'] ?? 0;
@@ -320,6 +395,38 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _markTipAsSeen(String tipId) async {
+    final key = 'tip_$tipId';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('ignored_suggestion_$key', true);
+
+    if (mounted) {
+      setState(() {
+        _ignoredSuggestions.add(key);
+        _activeTip = null;
+        _tipExpanded = false;
+      });
+    }
+  }
+
+  void _pickRandomTip() {
+    if (_activeTip != null) return;
+
+     
+    if (Random().nextDouble() > 0.3) return;
+
+    final availableTips =
+        _allTips
+            .where((t) => !_ignoredSuggestions.contains('tip_${t.id}'))
+            .toList();
+
+    if (availableTips.isNotEmpty) {
+      setState(() {
+        _activeTip = availableTips[Random().nextInt(availableTips.length)];
+      });
+    }
+  }
+
   void _checkForStalledHabits() {
     if (!widget.smartSuggestionsEnabled) {
       if (_stalledHabit != null) {
@@ -332,7 +439,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     final now = DateTime.now();
     final threeDaysAgo = now.subtract(const Duration(days: 3));
 
-    // Priority 1: Stalled habits
+     
     for (final h in _habits) {
       if (h['type'] == 'bad') continue;
 
@@ -363,12 +470,13 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         setState(() {
           _stalledHabit = h;
           _suggestionType = 'stalled';
+          _activeTip = null;  
         });
         return;
       }
     }
 
-    // Priority 2: Remove reminders for established habits
+     
     for (final h in _habits) {
       if (h['type'] == 'bad') continue;
 
@@ -383,9 +491,15 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         setState(() {
           _stalledHabit = h;
           _suggestionType = 'remove_reminders';
+          _activeTip = null;  
         });
         return;
       }
+    }
+
+     
+    if (_stalledHabit == null) {
+      _pickRandomTip();
     }
   }
 
@@ -400,7 +514,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         goodList = (dashboard['habits'] as List?) ?? [];
         badList = (dashboard['badHabits'] as List?) ?? [];
 
-        // If dashboard returned empty lists, try individual endpoints as fallback
+         
         if (goodList.isEmpty) {
           try {
             goodList = await widget.apiService.getHabits();
@@ -695,7 +809,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                   final merged = Map<String, dynamic>.from(existing);
                   merged.addAll(updatedHabit);
 
-                  // Ensure type is preserved if missing in update
+                   
                   if (!updatedHabit.containsKey('type')) {
                     merged['type'] = existing['type'];
                   }
@@ -967,8 +1081,11 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                 : TabBarView(
                     controller: _tabController,
                     children: [
-                      // Good Habits Tab
-                      goodHabits.isEmpty && _stalledHabit == null
+                       
+                      goodHabits.isEmpty &&
+                              _stalledHabit == null &&
+                              (_activeTip == null ||
+                                  _activeTip!.targetTab == 'bad')
                           ? Center(
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1010,6 +1127,136 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                                   120,
                                 ),
                                 children: [
+                                  if (_activeTip != null &&
+                                      (_activeTip!.targetTab == 'good' ||
+                                          _activeTip!.targetTab == 'any')) ...[
+                                    Container(
+                                      margin: const EdgeInsets.fromLTRB(
+                                        16,
+                                        0,
+                                        16,
+                                        24,
+                                      ),
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: scheme.surfaceContainer,
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(
+                                          color: scheme.outlineVariant
+                                              .withOpacity(0.5),
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                Icons.lightbulb_outline_rounded,
+                                                color: scheme.primary,
+                                                size: 20,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  _activeTip!.title,
+                                                  style: GoogleFonts.gabarito(
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: scheme.primary,
+                                                  ),
+                                                ),
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(
+                                                  Icons.close,
+                                                  size: 18,
+                                                ),
+                                                onPressed: () => setState(
+                                                  () => _activeTip = null,
+                                                ),
+                                                padding: EdgeInsets.zero,
+                                                constraints:
+                                                    const BoxConstraints(),
+                                                style: IconButton.styleFrom(
+                                                  tapTargetSize:
+                                                      MaterialTapTargetSize
+                                                          .shrinkWrap,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text.rich(
+                                            TextSpan(
+                                              children: [
+                                                TextSpan(
+                                                  text: _activeTip!.content,
+                                                ),
+                                                if (_tipExpanded &&
+                                                    _activeTip!
+                                                            .expandedContent !=
+                                                        null)
+                                                  TextSpan(
+                                                    text: _activeTip!
+                                                        .expandedContent,
+                                                  ),
+                                              ],
+                                            ),
+                                            style: GoogleFonts.gabarito(
+                                              fontSize: 14,
+                                              color: scheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                          Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.end,
+                                            children: [
+                                              if (_activeTip!.expandedContent !=
+                                                      null &&
+                                                  !_tipExpanded)
+                                                TextButton.icon(
+                                                  onPressed: () => setState(
+                                                    () => _tipExpanded = true,
+                                                  ),
+                                                  icon: const Icon(
+                                                    Icons.keyboard_arrow_down_rounded,
+                                                    size: 18,
+                                                  ),
+                                                  label: Text(
+                                                    'View more',
+                                                    style: GoogleFonts.gabarito(
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                ),
+                                              TextButton.icon(
+                                                onPressed: () => _markTipAsSeen(
+                                                  _activeTip!.id,
+                                                ),
+                                                icon: const Icon(
+                                                  Icons.check,
+                                                  size: 16,
+                                                ),
+                                                label: const Text("Got it"),
+                                                style: TextButton.styleFrom(
+                                                  foregroundColor:
+                                                      scheme.outline,
+                                                  textStyle:
+                                                      GoogleFonts.gabarito(
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                   if (_stalledHabit != null) ...[
                                     Container(
                                       margin: const EdgeInsets.fromLTRB(
@@ -1146,8 +1393,10 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                               ),
                             ),
 
-                      // Bad Habits Tab
-                      badHabits.isEmpty
+                       
+                      badHabits.isEmpty &&
+                              (_activeTip == null ||
+                                  _activeTip!.targetTab == 'good')
                           ? Center(
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1189,6 +1438,136 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                                   120,
                                 ),
                                 children: [
+                                  if (_activeTip != null &&
+                                      (_activeTip!.targetTab == 'bad' ||
+                                          _activeTip!.targetTab == 'any')) ...[
+                                    Container(
+                                      margin: const EdgeInsets.fromLTRB(
+                                        16,
+                                        0,
+                                        16,
+                                        24,
+                                      ),
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: scheme.surfaceContainer,
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(
+                                          color: scheme.outlineVariant
+                                              .withOpacity(0.5),
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                Icons.lightbulb_outline_rounded,
+                                                color: scheme.primary,
+                                                size: 20,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  _activeTip!.title,
+                                                  style: GoogleFonts.gabarito(
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: scheme.primary,
+                                                  ),
+                                                ),
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(
+                                                  Icons.close,
+                                                  size: 18,
+                                                ),
+                                                onPressed: () => setState(
+                                                  () => _activeTip = null,
+                                                ),
+                                                padding: EdgeInsets.zero,
+                                                constraints:
+                                                    const BoxConstraints(),
+                                                style: IconButton.styleFrom(
+                                                  tapTargetSize:
+                                                      MaterialTapTargetSize
+                                                          .shrinkWrap,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text.rich(
+                                            TextSpan(
+                                              children: [
+                                                TextSpan(
+                                                  text: _activeTip!.content,
+                                                ),
+                                                if (_tipExpanded &&
+                                                    _activeTip!
+                                                            .expandedContent !=
+                                                        null)
+                                                  TextSpan(
+                                                    text: _activeTip!
+                                                        .expandedContent,
+                                                  ),
+                                              ],
+                                            ),
+                                            style: GoogleFonts.gabarito(
+                                              fontSize: 14,
+                                              color: scheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                          Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.end,
+                                            children: [
+                                              if (_activeTip!.expandedContent !=
+                                                      null &&
+                                                  !_tipExpanded)
+                                                TextButton.icon(
+                                                  onPressed: () => setState(
+                                                    () => _tipExpanded = true,
+                                                  ),
+                                                  icon: const Icon(
+                                                    Icons.keyboard_arrow_down_rounded,
+                                                    size: 18,
+                                                  ),
+                                                  label: Text(
+                                                    'View more',
+                                                    style: GoogleFonts.gabarito(
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                ),
+                                              TextButton.icon(
+                                                onPressed: () => _markTipAsSeen(
+                                                  _activeTip!.id,
+                                                ),
+                                                icon: const Icon(
+                                                  Icons.check,
+                                                  size: 16,
+                                                ),
+                                                label: const Text("Got it"),
+                                                style: TextButton.styleFrom(
+                                                  foregroundColor:
+                                                      scheme.outline,
+                                                  textStyle:
+                                                      GoogleFonts.gabarito(
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                   ...badHabits.map(
                                     (h) => _habitCard(
                                       h,

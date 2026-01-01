@@ -6,6 +6,7 @@ import 'package:appwrite/appwrite.dart';
 import 'package:appwrite/models.dart' as models;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
@@ -25,14 +26,12 @@ Future<void> _initializeTimezone() async {
     String timeZoneName = localTimezone.toString();
     print('Raw timezone string: $timeZoneName');
 
-    // Try to find a valid timezone ID using regex (e.g., "Asia/Kolkata", "America/New_York")
     final RegExp regex = RegExp(r'([A-Za-z]+/[A-Za-z_]+)');
     final match = regex.firstMatch(timeZoneName);
 
     if (match != null) {
       timeZoneName = match.group(1)!;
     } else {
-      // Handle TimezoneInfo object string representation (seen on Linux)
       if (timeZoneName.startsWith('TimezoneInfo(')) {
         final split = timeZoneName.split(',');
         if (split.isNotEmpty) {
@@ -46,7 +45,7 @@ Future<void> _initializeTimezone() async {
   } catch (e) {
     print("Could not get local timezone: $e");
     try {
-      tz.setLocalLocation(tz.getLocation('Asia/Kolkata')); // Try a default
+      tz.setLocalLocation(tz.getLocation('Asia/Kolkata'));
       print('Fallback to Asia/Kolkata');
     } catch (_) {
       tz.setLocalLocation(tz.getLocation('UTC'));
@@ -96,20 +95,73 @@ void main() async {
   runApp(MyApp(account: account));
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   final Account account;
   const MyApp({super.key, required this.account});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  bool _dynamicColor = true;
+  String _themeMode = 'auto';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadThemeSettings();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadThemeSettings();
+    }
+  }
+
+  Future<void> _loadThemeSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _dynamicColor = prefs.getBool('dynamic_color') ?? true;
+        _themeMode = prefs.getString('theme_mode') ?? 'auto';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return DynamicColorBuilder(
       builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
-        final lightColorScheme =
-            lightDynamic ??
-            MaterialTheme(GoogleFonts.gabaritoTextTheme()).light().colorScheme;
-        final darkColorScheme =
-            darkDynamic ??
-            MaterialTheme(GoogleFonts.gabaritoTextTheme()).dark().colorScheme;
+        ColorScheme lightColorScheme;
+        ColorScheme darkColorScheme;
+
+        if (_dynamicColor && lightDynamic != null && darkDynamic != null) {
+          lightColorScheme = lightDynamic;
+          darkColorScheme = darkDynamic;
+        } else {
+          lightColorScheme = MaterialTheme(
+            GoogleFonts.gabaritoTextTheme(),
+          ).light().colorScheme;
+          darkColorScheme = MaterialTheme(
+            GoogleFonts.gabaritoTextTheme(),
+          ).dark().colorScheme;
+        }
+
+        ThemeMode mode = ThemeMode.system;
+        if (!_dynamicColor) {
+          if (_themeMode == 'light') mode = ThemeMode.light;
+          if (_themeMode == 'dark') mode = ThemeMode.dark;
+        }
+
         return MaterialApp(
           theme: ThemeData(
             colorScheme: lightColorScheme,
@@ -121,11 +173,13 @@ class MyApp extends StatelessWidget {
             textTheme: GoogleFonts.gabaritoTextTheme(),
             useMaterial3: true,
           ),
-          themeMode: ThemeMode.system,
+          themeMode: mode,
 
           builder: (context, child) {
             final brightness = MediaQuery.of(context).platformBrightness;
-            final isDarkMode = brightness == Brightness.dark;
+            final isDarkMode = mode == ThemeMode.system
+                ? brightness == Brightness.dark
+                : mode == ThemeMode.dark;
             return AnnotatedRegion<SystemUiOverlayStyle>(
               value: SystemUiOverlayStyle(
                 systemNavigationBarColor: Colors.transparent,
@@ -140,7 +194,7 @@ class MyApp extends StatelessWidget {
               child: child!,
             );
           },
-          home: AuthCheck(account: account),
+          home: AuthCheck(account: widget.account),
           debugShowCheckedModeBanner: false,
         );
       },
@@ -375,7 +429,6 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                   AppConfig.setAppwriteConfig(awEndpoint, awProject);
                   await AppConfig.saveToPrefs();
 
-                  // Update the active client
                   widget.account.client
                       .setEndpoint(awEndpoint)
                       .setProject(awProject);

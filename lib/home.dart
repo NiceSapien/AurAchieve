@@ -23,6 +23,7 @@ import 'habits.dart';
 import 'widgets/habit_details_sheet.dart';
 import 'shop.dart';
 import 'settings.dart';
+import 'profile.dart';
 
 enum AuraHistoryView { day, month, year }
 
@@ -146,10 +147,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   final bool _showAllTasks = false;
   final bool _showAllStudyTasks = false;
-  List<Map<String, dynamic>> _todaysStudyPlan = [];
-  List<Subject> _subjects = [];
-  bool _isStudyPlanSetupComplete = false;
-  Map<String, dynamic>? _studyPlanMap;
   bool _showQuote = true;
 
   List<DateTime?> auraDatesForView = [];
@@ -333,20 +330,32 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _fetchDataFromServer() async {
     if (!mounted || _refreshInFlight) return;
     _refreshInFlight = true;
-    setState(() {
-      isLoading = true;
-      _taskLoadError = null;
-    });
+    
+    
+    if (tasks.isEmpty && _preloadedHabits.isEmpty) {
+      setState(() {
+        isLoading = true;
+        _taskLoadError = null;
+      });
+    }
+
     try {
-      final dashboard = await _apiService.getTasksAndHabits();
+      
+      final dashboard = await _apiService.getTasksAndHabits().timeout(
+        const Duration(seconds: 20),
+        onTimeout: () {
+          throw TimeoutException('Failed to load data in time.');
+        },
+      );
 
       List<dynamic> badHabits = (dashboard['badHabits'] as List?) ?? [];
       if (badHabits.isEmpty) {
         try {
-          badHabits = await _apiService.getBadHabits();
-          print(
-            'DEBUG: Fetched ${badHabits.length} bad habits via separate call',
-          );
+          
+          
+          
+          
+          
         } catch (e) {
           debugPrint('Failed to fetch bad habits: $e');
         }
@@ -377,20 +386,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           .map((t) => Task.fromJson(t as Map<String, dynamic>))
           .toList();
 
-      Map<String, dynamic>? planMap;
-      final sp = dashboard['studyPlan'];
-      if (sp is List && sp.isNotEmpty) {
-        final first = sp.first;
-        if (first is Map) {
-          planMap = Map<String, dynamic>.from(first);
-        }
-      } else if (sp is Map) {
-        planMap = Map<String, dynamic>.from(sp);
-      }
-
       setState(() {
         final apiName = (dashboard['name'] as String?)?.trim();
         if (apiName != null && apiName.isNotEmpty) userName = apiName;
+
+        if (dashboard['username'] != null) {
+          _userProfile = {'username': dashboard['username']};
+        }
 
         final auraValue = dashboard['aura'];
         if (auraValue is num) {
@@ -411,34 +413,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             .toList();
         tasks = allTasks.where((t) => t.status == 'pending').toList();
         _preloadedHabits = allHabits;
-
-        _studyPlanMap = planMap;
-        _isStudyPlanSetupComplete = planMap != null && planMap.isNotEmpty;
-
-        _subjects = [];
-        if (planMap != null) {
-          final subjectsJson = planMap['subjects'];
-          if (subjectsJson is List) {
-            _subjects = subjectsJson
-                .whereType<Map>()
-                .map((m) => Subject.fromJson(Map<String, dynamic>.from(m)))
-                .toList();
-          }
-
-          _todaysStudyPlan = [];
-          final timetable = planMap['timetable'];
-          if (timetable is List) {
-            final todayStr = _todayDateStringLocal();
-            final today = timetable.whereType<Map>().firstWhere(
-              (d) => d['date'] == todayStr,
-              orElse: () => const {'date': '', 'tasks': <dynamic>[]},
-            );
-            final tasksList = (today['tasks'] as List?) ?? const [];
-            _todaysStudyPlan = tasksList.whereType<Map>().map((e) {
-              return Map<String, dynamic>.from(e);
-            }).toList();
-          }
-        }
       });
     } catch (e) {
       setState(() {
@@ -861,12 +835,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (mounted) {
           setState(() {
             _isTimetableSetupInProgress = !isComplete;
-            _isStudyPlanSetupComplete = isComplete;
           });
-
-          if (isComplete) {
-            _fetchDataFromServer();
-          }
         }
       });
     }
@@ -959,8 +928,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           onSetupStateChanged: _updateTimetableSetupState,
           apiService: _apiService,
           onTaskCompleted: _fetchDataFromServer,
-          initialStudyPlan: _studyPlanMap,
-          autoFetchIfMissing: false,
+          initialStudyPlan: null,
+          autoFetchIfMissing: true,
         ),
       );
       keys.add('planner');
@@ -991,8 +960,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           onSetupStateChanged: _updateTimetableSetupState,
           apiService: _apiService,
           onTaskCompleted: _fetchDataFromServer,
-          initialStudyPlan: _studyPlanMap,
-          autoFetchIfMissing: false,
+          initialStudyPlan: null,
+          autoFetchIfMissing: true,
         );
       case 'home':
       default:
@@ -1102,29 +1071,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           actions: [
             IconButton(
               icon: Icon(
-                Icons.storefront_outlined,
+                Icons.account_circle_rounded,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
+                size: 32,
               ),
-              tooltip: 'Shop',
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        ShopPage(apiService: _apiService, currentAura: aura),
-                  ),
-                );
-              },
-            ),
-            IconButton(
-              icon: Icon(
-                Icons.settings_outlined,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-              tooltip: 'Settings',
+              tooltip: 'Profile',
               onPressed: () async {
                 await Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (context) => SettingsScreen(
+                    builder: (context) => ProfilePage(
+                      apiService: _apiService,
+                      aura: aura,
+                      tasks: tasks,
+                      auraHistory: auraHistory,
+                      auraDates: auraDates,
+                      completedTasks: completedTasks,
                       showQuote: _showQuote,
                       smartSuggestions: _smartSuggestions,
                       enabledTabs: _enabledTabs,
@@ -1145,6 +1106,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         await _updateEnabledTabs(tabs);
                       },
                       onLogout: logout,
+                      username: _userProfile?['username'],
+                      onAuraChanged: (newAura) {
+                        setState(() {
+                          aura = newAura;
+                          _aura = newAura;
+                        });
+                      },
                     ),
                   ),
                 );
@@ -1180,8 +1148,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     onSetupStateChanged: _updateTimetableSetupState,
                     apiService: _apiService,
                     onTaskCompleted: _fetchDataFromServer,
-                    initialStudyPlan: _studyPlanMap,
-                    autoFetchIfMissing: false,
+                    initialStudyPlan: null,
+                    autoFetchIfMissing: true,
+                    onPlanUpdated: _fetchDataFromServer,
                   ),
                 ],
               ),
@@ -1236,6 +1205,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ),
         floatingActionButton: _selectedIndex == 0
             ? FloatingActionButton.extended(
+                heroTag: 'home_fab',
                 onPressed: _addTask,
                 icon: const Icon(Icons.add_rounded),
                 label: const Text('Add Task'),
@@ -1757,7 +1727,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         final hasHabits = _preloadedHabits.isNotEmpty;
         final scheme = Theme.of(context).colorScheme;
 
-        if (pendingTasks.isEmpty && !hasHabits && !_isStudyPlanSetupComplete) {
+        if (pendingTasks.isEmpty && !hasHabits) {
           return _buildEmptyTasksView();
         }
 
@@ -1950,64 +1920,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 return _buildHabitCardForHome(m, index, scheme);
               }),
             ],
-            if (_isStudyPlanSetupComplete) ...[
-              const SizedBox(height: 24.0),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "Study Plan",
-                    style: GoogleFonts.gabarito(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-
-                  IconButton(
-                    icon: const Icon(Icons.arrow_forward_rounded),
-                    onPressed: () {
-                      final keys = _currentTabKeys();
-                      final idx = keys.indexOf('planner');
-                      if (idx != -1) setState(() => _selectedIndex = idx);
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              if (_todaysStudyPlan.isEmpty)
-                Card(
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.outlineVariant.withOpacity(0.4),
-                    ),
-                  ),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: Theme.of(
-                        context,
-                      ).colorScheme.tertiaryContainer,
-                      child: Icon(
-                        Icons.self_improvement_outlined,
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.onTertiaryContainer,
-                      ),
-                    ),
-                    title: const Text("Break Day"),
-                    subtitle: const Text("Relax and recharge!"),
-                  ),
-                )
-              else
-                ..._todaysStudyPlan
-                    .take(3)
-                    .map((task) => _buildStudyPlanTile(task)),
-            ],
           ],
         );
       },
@@ -2135,163 +2047,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return DateFormat('yyyy-MM-dd').format(today);
   }
 
-  Future<void> _completeStudyPlanFromHome(Map<String, dynamic> item) async {
-    if ((item['completed'] as bool?) == true) return;
 
-    bool dialogShown = false;
-    if (mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const Center(child: CircularProgressIndicator()),
-      );
-      dialogShown = true;
-    }
-
-    try {
-      final result = await _apiService.completeStudyPlanTask(
-        item['id'],
-        _todayDateStringLocal(),
-      );
-
-      await _fetchDataFromServer();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('You gained ${result['auraChange'] ?? 30} Aura!'),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to update task: $e'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
-    } finally {
-      if (dialogShown && mounted) Navigator.pop(context);
-    }
-  }
-
-  Widget _buildStudyPlanTile(Map<String, dynamic> item) {
-    IconData icon;
-    Widget title;
-    Widget? subtitle;
-    Widget? trailing;
-    Color avatarColor;
-
-    switch (item['type']) {
-      case 'study':
-        {
-          final content = item['content'] as Map<String, dynamic>;
-          final subjectName = content['subject'] as String? ?? 'Unknown';
-          final subject = _subjects.firstWhere(
-            (s) => s.name == subjectName,
-            orElse: () => Subject(
-              name: 'Unknown',
-              icon: Icons.help,
-              color: Theme.of(context).colorScheme.outline,
-            ),
-          );
-          final chapterNumber = content['chapterNumber'] as String?;
-          final chapterName = content['chapterName'] as String? ?? '';
-
-          icon = subject.icon;
-          avatarColor = subject.color;
-          title = Text(
-            chapterName.isNotEmpty ? chapterName : "Chapter $chapterNumber",
-            style: const TextStyle(fontWeight: FontWeight.w500),
-          );
-          subtitle = Text(subject.name);
-          if (chapterName.isNotEmpty) {
-            trailing = Text(
-              "Ch. $chapterNumber",
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            );
-          }
-          break;
-        }
-      case 'revision':
-        {
-          final content = item['content'] as Map<String, dynamic>;
-          final subjectName = content['subject'] as String? ?? 'Unknown';
-          final subject = _subjects.firstWhere(
-            (s) => s.name == subjectName,
-            orElse: () => Subject(
-              name: 'Unknown',
-              icon: Icons.help,
-              color: Theme.of(context).colorScheme.outline,
-            ),
-          );
-          final chapterNumber = content['chapterNumber'] as String?;
-          final chapterName = content['chapterName'] as String? ?? '';
-
-          icon = Icons.history_outlined;
-          avatarColor = subject.color.withOpacity(0.7);
-          title = Text(
-            chapterName.isNotEmpty
-                ? "Revise: $chapterName"
-                : "Revise: Chapter $chapterNumber",
-          );
-          subtitle = Text(subject.name);
-          break;
-        }
-      default:
-        icon = Icons.self_improvement_outlined;
-        avatarColor = Theme.of(context).colorScheme.tertiaryContainer;
-        title = const Text("Break Day");
-        subtitle = const Text("Relax and recharge!");
-    }
-
-    final iconColor =
-        ThemeData.estimateBrightnessForColor(avatarColor) == Brightness.dark
-        ? Colors.white
-        : Colors.black;
-    final isBreak = item['type'] == 'break';
-    final isCompleted = (item['completed'] as bool?) ?? false;
-
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.4),
-        ),
-      ),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: avatarColor,
-          child: Icon(icon, color: iconColor),
-        ),
-        title: title,
-        subtitle: subtitle,
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (trailing != null) trailing,
-            if (!isBreak)
-              Checkbox(
-                value: isCompleted,
-                onChanged: isCompleted
-                    ? null
-                    : (v) {
-                        if (v == true) _completeStudyPlanFromHome(item);
-                      },
-              ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _materialYouTaskIcon(String intensity, BuildContext context) {
     final cs = Theme.of(context).colorScheme;

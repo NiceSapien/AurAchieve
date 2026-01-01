@@ -4,6 +4,9 @@ import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 import 'widgets/dynamic_color_svg.dart';
 import 'api_service.dart';
@@ -45,7 +48,7 @@ class Subject {
     'icon_code_point': icon.codePoint,
     'icon_font_family': icon.fontFamily,
     'icon_font_package': icon.fontPackage,
-    'color_value': color.value,
+    'color_value': color.toARGB32(),
   };
 
   factory Subject.fromJson(Map<String, dynamic> json) {
@@ -55,7 +58,7 @@ class Subject {
     return Subject(
       name: json['name'],
       icon: icon,
-      color: Color(json['color_value'] ?? Colors.blue.value),
+      color: Color(json['color_value'] ?? Colors.blue.toARGB32()),
     );
   }
 }
@@ -66,6 +69,7 @@ class StudyPlannerScreen extends StatefulWidget {
   final VoidCallback? onTaskCompleted;
   final Map<String, dynamic>? initialStudyPlan;
   final bool autoFetchIfMissing;
+  final VoidCallback? onPlanUpdated;
 
   const StudyPlannerScreen({
     super.key,
@@ -74,6 +78,7 @@ class StudyPlannerScreen extends StatefulWidget {
     this.onTaskCompleted,
     this.initialStudyPlan,
     this.autoFetchIfMissing = true,
+    this.onPlanUpdated,
   });
 
   @override
@@ -92,7 +97,6 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
   Map<String, List<Map<String, String>>> _chapters = {};
   DateTime? _deadline;
   List<Map<String, dynamic>> _generatedTimetable = [];
-  Map<String, dynamic>? _studyPlan;
 
   final TextEditingController _subjectController = TextEditingController();
   IconData _currentSubjectIcon = Icons.subject;
@@ -103,24 +107,42 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
   Timer? _autoScrollTimer;
 
   static final List<Color> _subjectColors = [
-    Colors.green[200]!,
-    Colors.purple[200]!,
-    Colors.blue[200]!,
-    Colors.red[200]!,
-    Colors.orange[200]!,
-    Colors.teal[200]!,
-    Colors.pink[100]!,
-    Colors.amber[200]!,
-    Colors.indigo[100]!,
-    Colors.cyan[200]!,
+    Colors.redAccent,
+    Colors.pinkAccent,
+    Colors.purpleAccent,
+    Colors.deepPurpleAccent,
+    Colors.indigoAccent,
+    Colors.blueAccent,
+    Colors.lightBlueAccent,
+    Colors.cyanAccent,
+    Colors.tealAccent,
+    Colors.greenAccent,
+    Colors.lightGreenAccent,
+    Colors.limeAccent,
+    Colors.amberAccent,
+    Colors.orangeAccent,
+    Colors.deepOrangeAccent,
   ];
 
   bool? _lastReportedSetupComplete;
-  final bool _notifiedOnceAfterMount = false;
+  TimeOfDay? _reminderTime;
+  final List<String> _loadingMessages = [
+    "Consulting the Oracle of Knowledge...",
+    "Brewing a potion of productivity...",
+    "Summoning the Study Spirits...",
+    "Calculating the optimal path to success...",
+    "Organizing your chaos...",
+    "Sharpening pencils...",
+    "Aligning the stars for your exams...",
+    "Loading brain cells...",
+  ];
+  int _currentMessageIndex = 0;
+  Timer? _messageTimer;
 
   @override
   void initState() {
     super.initState();
+    _loadReminderTime();
 
     if (widget.initialStudyPlan != null) {
       _parseAndSetPlan(widget.initialStudyPlan);
@@ -143,6 +165,118 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
     if (widget.initialStudyPlan != oldWidget.initialStudyPlan &&
         widget.initialStudyPlan != null) {
       _parseAndSetPlan(widget.initialStudyPlan);
+    }
+  }
+
+  Future<void> _loadReminderTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hour = prefs.getInt('study_reminder_hour');
+    final minute = prefs.getInt('study_reminder_minute');
+    if (hour != null && minute != null) {
+      setState(() {
+        _reminderTime = TimeOfDay(hour: hour, minute: minute);
+      });
+    }
+  }
+
+  Future<void> _pickReminderTime() async {
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: _reminderTime ?? const TimeOfDay(hour: 9, minute: 0),
+      builder: (context, child) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return Theme(
+          data: Theme.of(context).copyWith(
+            timePickerTheme: TimePickerThemeData(
+              helpTextStyle: TextStyle(
+                color: isDark ? Colors.white : Theme.of(context).colorScheme.onSurface,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && picked != _reminderTime) {
+      setState(() {
+        _reminderTime = picked;
+      });
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('study_reminder_hour', picked.hour);
+      await prefs.setInt('study_reminder_minute', picked.minute);
+      await _scheduleReminders();
+    }
+  }
+
+  Future<void> _scheduleReminders() async {
+    if (_reminderTime == null) return;
+
+    final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+    for (final day in _generatedTimetable) {
+      final dateStr = day['date'] as String;
+      final date = DateTime.parse(dateStr);
+      final tasks = day['tasks'] as List;
+
+      
+      bool isBreak = tasks.any((t) => t['type'] == 'break');
+      if (isBreak) continue;
+
+      final scheduledDate = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        _reminderTime!.hour,
+        _reminderTime!.minute,
+      );
+
+      if (scheduledDate.isBefore(DateTime.now())) continue;
+
+      final tzDate = tz.TZDateTime.from(scheduledDate, tz.local);
+
+      final id = dateStr.hashCode;
+
+      try {
+        await flutterLocalNotificationsPlugin.zonedSchedule(
+          id,
+          'Study Reminder',
+          'Time to focus on your study plan!',
+          tzDate,
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'study_reminders',
+              'Study Reminders',
+              channelDescription: 'Reminders for your study plan',
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
+          ),
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        );
+      } catch (e) {
+        debugPrint('Error scheduling notification: $e');
+      }
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Reminders scheduled!')));
+    }
+  }
+
+  Future<void> _cancelReminders() async {
+    final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+    for (final day in _generatedTimetable) {
+      final dateStr = day['date'] as String;
+      await flutterLocalNotificationsPlugin.cancel(dateStr.hashCode);
     }
   }
 
@@ -170,7 +304,6 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
       }
 
       _setStateIfMounted(() {
-        _studyPlan = plan;
         _isSetupComplete = true;
 
         final subjectsJson = asList(plan['subjects']);
@@ -238,7 +371,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
       final plan = await widget.apiService.getStudyPlan();
       _parseAndSetPlan(plan);
     } catch (e) {
-      print('Error loading study plan: $e');
+      debugPrint('Error loading study plan: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to load study plan: $e')),
@@ -255,11 +388,27 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
 
   @override
   void dispose() {
+    _messageTimer?.cancel();
     _autoScrollTimer?.cancel();
     _previewScrollController.dispose();
     _pageController.dispose();
     _subjectController.dispose();
     super.dispose();
+  }
+
+  void _startMessageTimer() {
+    _messageTimer?.cancel();
+    _currentMessageIndex = 0;
+    _messageTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      setState(() {
+        _currentMessageIndex =
+            (_currentMessageIndex + 1) % _loadingMessages.length;
+      });
+    });
+  }
+
+  void _stopMessageTimer() {
+    _messageTimer?.cancel();
   }
 
   void _startAutoScroll(Offset globalPos) {
@@ -293,19 +442,6 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
   void _stopAutoScroll() {
     _autoScrollTimer?.cancel();
     _autoScrollTimer = null;
-  }
-
-  void _addTaskToDay(String date, Map<String, dynamic> task) {
-    final idx = _generatedTimetable.indexWhere((d) => d['date'] == date);
-    if (idx == -1) return;
-    final tasks = List<Map<String, dynamic>>.from(
-      _generatedTimetable[idx]['tasks'] as List,
-    );
-    tasks.removeWhere((t) => t['type'] == 'break');
-    tasks.add(task);
-    setState(() {
-      _generatedTimetable[idx]['tasks'] = tasks;
-    });
   }
 
   IconData _getIconForSubject(String subjectName) {
@@ -384,7 +520,9 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
     if (!mounted) return;
 
     if (confirm == true) {
+      setState(() => _isLoading = true);
       try {
+        await _cancelReminders();
         await widget.apiService.deleteStudyPlan();
         if (!mounted) return;
         _setStateIfMounted(() {
@@ -393,12 +531,13 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
           _chapters.clear();
           _deadline = null;
           _generatedTimetable.clear();
-          _studyPlan = null;
           _currentPage = 0;
+          _isLoading = false;
         });
         if (mounted) widget.onSetupStateChanged(false);
       } catch (e) {
         if (mounted) {
+          setState(() => _isLoading = false);
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(SnackBar(content: Text('Failed to reset plan: $e')));
@@ -446,7 +585,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
     final existingChapterNumbers =
         _chapters[subject]
             ?.map((chap) => int.tryParse(chap['number']!))
-            .where((num) => num != null)
+            .where((number) => number != null)
             .cast<int>()
             .toSet() ??
         {};
@@ -536,11 +675,13 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
     _setStateIfMounted(() {
       _isGenerating = true;
     });
+    _startMessageTimer();
 
     if (_subjects.isEmpty || _deadline == null) {
       _setStateIfMounted(() {
         _isGenerating = false;
       });
+      _stopMessageTimer();
       return;
     }
 
@@ -563,7 +704,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         _generatedTimetable = newTimetable;
       });
     } catch (e) {
-      print('Error generating study plan preview from API: $e');
+      debugPrint('Error generating study plan preview from API: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to generate study plan preview: $e')),
@@ -571,6 +712,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
       }
     } finally {
       if (!mounted) return;
+      _stopMessageTimer();
       _setStateIfMounted(() {
         _isGenerating = false;
       });
@@ -591,8 +733,10 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
       );
       if (!mounted) return;
       await _loadTimetableData();
+      await _scheduleReminders();
+      widget.onPlanUpdated?.call();
     } catch (e) {
-      print('Error saving study plan: $e');
+      debugPrint('Error saving study plan: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to save study plan: $e')),
@@ -618,6 +762,9 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
       });
     }
     if (_currentPage == 3 && _deadline == null) return false;
+    
+    
+    
     return true;
   }
 
@@ -642,29 +789,112 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
   }
 
   Widget _buildOnboardingView() {
-    return Column(
-      children: [
-        Expanded(
-          child: PageView(
-            controller: _pageController,
-            onPageChanged: (page) => setState(() => _currentPage = page),
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              _buildIntroPage(
-                'assets/img/timetable.svg',
-                "Welcome to Study Planner",
-                "If you're a student who needs to study and remember books, this is for you.",
-              ),
-              _buildSubjectsPage(),
-              _buildChaptersPage(),
-              _buildDeadlinePage(),
-              _buildFinalPage(),
-              _buildPreviewPage(),
-            ],
+    return Scaffold(
+      body: Column(
+        children: [
+          Expanded(
+            child: PageView(
+              controller: _pageController,
+              onPageChanged: (page) => setState(() => _currentPage = page),
+              physics: const NeverScrollableScrollPhysics(),
+              children: [
+                _buildIntroPage(
+                  'assets/img/timetable.svg',
+                  "Welcome to Study Planner",
+                  "If you're a student who needs to study and remember books, this is for you.",
+                ),
+                _buildSubjectsPage(),
+                _buildChaptersPage(),
+                _buildDeadlinePage(),
+                _buildReminderPage(),
+                _buildFinalPage(),
+                _buildPreviewPage(),
+              ],
+            ),
           ),
-        ),
-        _buildNavigationControls(),
-      ],
+          _buildNavigationControls(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReminderPage() {
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.notifications_active_outlined,
+            size: 120,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(height: 32),
+          Text(
+            "Set a Daily Reminder",
+            style: GoogleFonts.gabarito(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            "A reminder will be sent to you at this time everyday (except for break days) to study.",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 32),
+          InkWell(
+            onTap: _pickReminderTime,
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outline,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.access_time,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 16),
+                  Text(
+                    _reminderTime != null
+                        ? _reminderTime!.format(context)
+                        : "No reminder set",
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_reminderTime != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 16.0),
+              child: TextButton(
+                onPressed: () {
+                  setState(() {
+                    _reminderTime = null;
+                  });
+                },
+                child: const Text("Clear Reminder"),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -681,70 +911,194 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         .toList();
 
     return Scaffold(
-      body: ListView(
-        padding: const EdgeInsets.all(16.0),
-        children: [
-          Text(
-            "Today's Plan",
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface,
+      body: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            sliver: SliverToBoxAdapter(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Study Plan',
+                    style: GoogleFonts.gabarito(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(height: 8),
-
-          if ((todaySchedule['tasks'] as List).isEmpty)
-            _buildTaskTile({'type': 'break'}, todaySchedule['date'] as String)
-          else
-            ...?(todaySchedule['tasks'] as List?)?.map(
-              (task) => _buildTaskTile(task, todaySchedule['date'] as String),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            sliver: SliverToBoxAdapter(
+              child: Text(
+                "Today's Plan",
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
-          ExpansionTile(
-            shape: const Border(),
-            collapsedShape: const Border(),
-            title: const Text("See ahead of time"),
-            onExpansionChanged: (isExpanded) {
-              setState(() => _showFullSchedule = isExpanded);
-            },
-            children: [
-              if (!_showFullSchedule)
-                const Center(child: Text("Expand to see future schedule."))
-              else
-                ...futureSchedule.map((day) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(top: 16.0, bottom: 8.0),
-                        child: Text(
-                          DateFormat(
-                            'EEEE, MMM d',
-                          ).format(DateTime.parse(day['date'])),
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-                        ),
-                      ),
-
-                      if ((day['tasks'] as List).isEmpty)
-                        _buildTaskTile({'type': 'break'}, day['date'] as String)
-                      else
-                        ...(day['tasks'] as List).map(
-                          (task) => _buildTaskTile(task, day['date'] as String),
-                        ),
-                    ],
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  if ((todaySchedule['tasks'] as List).isEmpty) {
+                    return _buildTaskTile({
+                      'type': 'break',
+                    }, todaySchedule['date'] as String);
+                  }
+                  final tasks = todaySchedule['tasks'] as List;
+                  if (index >= tasks.length) return null;
+                  return _buildTaskTile(
+                    tasks[index],
+                    todaySchedule['date'] as String,
                   );
-                }),
-            ],
+                },
+                childCount: (todaySchedule['tasks'] as List).isEmpty
+                    ? 1
+                    : (todaySchedule['tasks'] as List).length,
+              ),
+            ),
           ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: ExpansionTile(
+                shape: const Border(),
+                collapsedShape: const Border(),
+                title: const Text("See ahead of time"),
+                onExpansionChanged: (isExpanded) {
+                  setState(() => _showFullSchedule = isExpanded);
+                },
+                children: [
+                  if (!_showFullSchedule)
+                    const Center(child: Text("Expand to see future schedule."))
+                  else
+                    ...futureSchedule.map((day) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              top: 16.0,
+                              bottom: 8.0,
+                            ),
+                            child: Text(
+                              DateFormat(
+                                'EEEE, MMM d',
+                              ).format(DateTime.parse(day['date'])),
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                            ),
+                          ),
+                          if ((day['tasks'] as List).isEmpty)
+                            _buildTaskTile({
+                              'type': 'break',
+                            }, day['date'] as String)
+                          else
+                            ...(day['tasks'] as List).map(
+                              (task) =>
+                                  _buildTaskTile(task, day['date'] as String),
+                            ),
+                        ],
+                      );
+                    }),
+                ],
+              ),
+            ),
+          ),
+          const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _resetTimetable,
-        label: const Text('Reset'),
-        icon: const Icon(Icons.refresh),
+        heroTag: 'planner_options_fab',
+        onPressed: _showOptionsDialog,
+        label: const Text('Options'),
+        icon: const Icon(Icons.menu_rounded),
         backgroundColor: Theme.of(context).colorScheme.primaryContainer,
         foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+      ),
+    );
+  }
+
+  void _showOptionsDialog() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text(
+          'Options',
+          style: TextStyle(
+            color: isDark ? Colors.white : Theme.of(context).colorScheme.onSurface,
+          ),
+        ),
+        children: [
+          SimpleDialogOption(
+            onPressed: () {
+              Navigator.pop(context);
+              _pickReminderTime();
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Row(
+                children: [
+                  Icon(
+                    _reminderTime != null
+                        ? Icons.notifications_active
+                        : Icons.notifications_outlined,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    _reminderTime != null
+                        ? 'Change Reminder (${_reminderTime!.format(context)})'
+                        : 'Set Reminder',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () {
+              Navigator.pop(context);
+              _resetTimetable();
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.refresh,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Reset Plan',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -816,17 +1170,18 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
 
     final today = DateUtils.dateOnly(DateTime.now());
     final taskDate = DateUtils.dateOnly(DateTime.parse(dateOfTask));
-    final isFutureTask = taskDate.isAfter(today);
+    final isFuture = taskDate.isAfter(today);
 
     switch (item['type']) {
       case 'study':
         final content = item['content'] as Map<String, dynamic>;
+        final subjectName = (content['subject'] as String? ?? 'Unknown').trim();
         final subject = _subjects.firstWhere(
-          (s) => s.name == content['subject'],
+          (s) => s.name.trim().toLowerCase() == subjectName.toLowerCase(),
           orElse: () => Subject(
-            name: 'Unknown',
-            icon: Icons.help,
-            color: Theme.of(context).colorScheme.outline,
+            name: subjectName,
+            icon: _getIconForSubject(subjectName),
+            color: _subjectColors[subjectName.hashCode.abs() % _subjectColors.length],
           ),
         );
 
@@ -852,12 +1207,13 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         break;
       case 'revision':
         final content = item['content'] as Map<String, dynamic>;
+        final subjectName = (content['subject'] as String? ?? 'Unknown').trim();
         final subject = _subjects.firstWhere(
-          (s) => s.name == content['subject'],
+          (s) => s.name.trim().toLowerCase() == subjectName.toLowerCase(),
           orElse: () => Subject(
-            name: 'Unknown',
-            icon: Icons.help,
-            color: Theme.of(context).colorScheme.outline,
+            name: subjectName,
+            icon: _getIconForSubject(subjectName),
+            color: _subjectColors[subjectName.hashCode.abs() % _subjectColors.length],
           ),
         );
 
@@ -867,7 +1223,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
 
         icon = Icons.history_outlined;
 
-        avatarColor = subject.color.withOpacity(0.7);
+        avatarColor = subject.color;
 
         title = Text(
           chapterName.isNotEmpty
@@ -885,21 +1241,30 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      elevation: 0,
+      elevation: 2,
+      shadowColor: Theme.of(context).shadowColor.withValues(alpha: 0.1),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: CircleAvatar(
-          backgroundColor: avatarColor,
+          backgroundColor: avatarColor.withValues(alpha: 0.2),
           child: Icon(
             icon,
-            color:
-                ThemeData.estimateBrightnessForColor(avatarColor) ==
-                    Brightness.dark
-                ? Colors.white
-                : Colors.black,
+            color: avatarColor,
           ),
         ),
-        title: title,
-        subtitle: subtitle,
+        title: DefaultTextStyle(
+          style: GoogleFonts.gabarito(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+          child: title,
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4.0),
+          child: subtitle,
+        ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -908,8 +1273,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
             if (item['type'] != 'break' && !isFeedback && !isPreview)
               Checkbox(
                 value: (item['completed'] as bool?) ?? false,
-                onChanged:
-                    isFutureTask || ((item['completed'] as bool?) ?? false)
+                onChanged: isFuture || ((item['completed'] as bool?) ?? false)
                     ? null
                     : (bool? value) {
                         if (value == true) {
@@ -941,22 +1305,22 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                     },
                     child: const Text('Back'),
                   )
-                : const SizedBox(width: 60),
+                : const SizedBox(width: 48),
             FilledButton(
               onPressed:
-                  !_isNextEnabled() || (_currentPage == 5 && _isGenerating)
+                  !_isNextEnabled() || (_currentPage == 6 && _isGenerating)
                   ? null
                   : () {
                       if (_currentPage == 1) {
                         FocusScope.of(context).unfocus();
                       }
-                      if (_currentPage == 4) {
+                      if (_currentPage == 5) {
                         _pageController.nextPage(
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.ease,
                         );
                         _generateTimetable();
-                      } else if (_currentPage == 5) {
+                      } else if (_currentPage == 6) {
                         _saveAndFinish();
                       } else {
                         _pageController.nextPage(
@@ -965,7 +1329,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                         );
                       }
                     },
-              child: Text(_currentPage == 5 ? 'Finish' : 'Next'),
+              child: Text(_currentPage == 6 ? 'Finish' : 'Next'),
             ),
           ],
         ),
@@ -1075,7 +1439,10 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                   ),
                   child: ListTile(
                     leading: IconButton(
-                      icon: Icon(subject.icon),
+                      icon: Icon(
+                        subject.icon,
+                        color: _subjectColors[subject.name.hashCode.abs() % _subjectColors.length],
+                      ),
                       onPressed: () => _changeSubjectIcon(subject),
                       tooltip: "Change Icon",
                     ),
@@ -1277,13 +1644,28 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
 
   Widget _buildPreviewPage() {
     if (_isGenerating) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text("Generating your custom schedule..."),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 24),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 500),
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                return FadeTransition(opacity: animation, child: child);
+              },
+              child: Text(
+                _loadingMessages[_currentMessageIndex],
+                key: ValueKey<int>(_currentMessageIndex),
+                textAlign: TextAlign.center,
+                style: GoogleFonts.gabarito(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            ),
           ],
         ),
       );
@@ -1346,7 +1728,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                 Widget buildHandle() {
                   final color = Theme.of(
                     context,
-                  ).colorScheme.onSurfaceVariant.withOpacity(0.55);
+                  ).colorScheme.onSurfaceVariant.withValues(alpha: 0.55);
                   return SizedBox(
                     width: 24,
                     height: 44,
@@ -1430,7 +1812,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                           _stopAutoScroll();
                           setState(() => _draggingPayload = null);
                         },
-                        onDraggableCanceled: (_, __) {
+                        onDraggableCanceled: (_, _) {
                           _stopAutoScroll();
                           setState(() => _draggingPayload = null);
                         },
@@ -1465,11 +1847,11 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                 final isReceiving = _draggingPayload != null;
                 final scheme = Theme.of(context).colorScheme;
                 final baseBorder = Border.all(
-                  color: scheme.outlineVariant.withOpacity(0.35),
+                  color: scheme.outlineVariant.withValues(alpha: 0.35),
                   width: 1.2,
                 );
                 final highlightBorder = Border.all(
-                  color: scheme.primary.withOpacity(0.55),
+                  color: scheme.primary.withValues(alpha: 0.55),
                   width: 1.6,
                 );
 
@@ -1517,12 +1899,11 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                                 decoration: BoxDecoration(
                                   color: Theme.of(
                                     context,
-                                  ).colorScheme.primary.withOpacity(0.10),
+                                  ).colorScheme.primary.withValues(alpha: 0.10),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primary.withOpacity(0.4),
+                                    color: Theme.of(context).colorScheme.primary
+                                        .withValues(alpha: 0.4),
                                   ),
                                 ),
                                 child: Center(

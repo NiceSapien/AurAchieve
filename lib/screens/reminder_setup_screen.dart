@@ -85,7 +85,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
 
   void _addTimeFromString(String s) {
     try {
-      // Expected format: "8:00 AM" or "20:00"
+       
       final dt = _parseTime(s);
       if (dt != null) {
         final tod = TimeOfDay.fromDateTime(dt);
@@ -100,8 +100,8 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
 
   DateTime? _parseTime(String s) {
     final now = DateTime.now();
-    // Try parsing with DateFormat if available, or manual parsing
-    // Simple manual parser for "H:mm AM/PM"
+     
+     
     try {
       final parts = s.split(' ');
       final timeParts = parts[0].split(':');
@@ -125,14 +125,14 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       String timeZoneName = localTimezone.toString();
       debugPrint('Raw timezone string: $timeZoneName');
 
-      // Try to find a valid timezone ID using regex (e.g., "Asia/Kolkata", "America/New_York")
+       
       final RegExp regex = RegExp(r'([A-Za-z]+/[A-Za-z_]+)');
       final match = regex.firstMatch(timeZoneName);
 
       if (match != null) {
         timeZoneName = match.group(1)!;
       } else {
-        // Fallback for simple IDs or if regex fails but string is valid
+         
         if (timeZoneName.startsWith('TimezoneInfo(')) {
           final split = timeZoneName.split(',');
           if (split.isNotEmpty) {
@@ -145,9 +145,9 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       debugPrint('Timezone set to: $timeZoneName');
     } catch (e) {
       debugPrint('Could not get local timezone: $e');
-      // Fallback to a known timezone if detection fails, or UTC
+       
       try {
-        tz.setLocalLocation(tz.getLocation('Asia/Kolkata')); // Try a default
+        tz.setLocalLocation(tz.getLocation('Asia/Kolkata'));  
         debugPrint('Fallback to Asia/Kolkata');
       } catch (_) {
         tz.setLocalLocation(tz.getLocation('UTC'));
@@ -167,15 +167,15 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
     final bool? androidResult = await androidImplementation
         ?.requestNotificationsPermission();
 
-    // Check exact alarm permission status
+     
     final exactAlarmStatus = await androidImplementation
         ?.requestExactAlarmsPermission();
     debugPrint('Exact Alarm Permission Status: $exactAlarmStatus');
 
-    // If permission is denied, we might need to open settings
+     
     if (exactAlarmStatus == false) {
-      // Note: requestExactAlarmsPermission() usually opens the settings directly
-      // or returns status. If it returns false/null, we might want to inform the user.
+       
+       
     }
 
     final iosImplementation = flutterLocalNotificationsPlugin
@@ -228,7 +228,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       android: androidNotificationDetails,
     );
 
-    // Explicitly create the channel
+     
     final androidImplementation = flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
@@ -242,14 +242,14 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       ),
     );
 
-    // Cancel existing notifications for this habit (simple approach: cancel all and reschedule)
-    // Ideally we'd track IDs, but for now we can just schedule new ones.
-    // Since we don't know the old IDs easily without storage, we might have duplicates if we don't clear.
-    // A better approach for a real app is to store notification IDs.
-    // For this iteration, we'll assume the user is okay with us just adding new ones or we rely on the ID generation to be consistent if we used the same logic.
-    // But since we are changing times, the IDs (habitId.hashCode + i) logic needs to be more robust to avoid collisions or leaks.
-    // Let's try to cancel a range of potential IDs if possible, or just proceed.
-    // Actually, let's just schedule.
+     
+     
+     
+     
+     
+     
+     
+     
 
     if (anyDaySelected && _selectedTimes.isNotEmpty) {
       int notificationIdOffset = 0;
@@ -259,7 +259,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
             final day = i + 1;
             final scheduledDate = _nextInstanceOf(day, time);
 
-            // Unique ID per habit + day + time
+             
             final notificationId = habitId.hashCode + notificationIdOffset;
             notificationIdOffset++;
 
@@ -288,7 +288,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       String habitId;
       if (widget.existingHabitId != null) {
         habitId = widget.existingHabitId!;
-        // We don't need to create the habit, just update reminders.
+         
       } else {
         final created = await widget.apiService.createHabit(
           habitName: widget.habitName,
@@ -320,9 +320,9 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
           await widget.apiService.saveHabitReminderLocal(habitId, selected);
           await _scheduleNotification(habitId, widget.habitName);
         } else {
-          // If no days/times selected, clear reminders
+           
           await widget.apiService.saveHabitReminderLocal(habitId, []);
-          // TODO: Cancel notifications
+           
         }
       }
 

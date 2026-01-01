@@ -53,7 +53,7 @@ There's not much about contributing yet. Make sure to deploy your own backend an
 
 ## Sponsors
 
-Currently, there are no sponsors.
+- [Renarin Kholin](https://github.com/renarin-kholin), $15
 
 If you appreciate AurAchieve and want to keep it free for everyone, please [sponsor](https://github.com/sponsors/NiceSapien) me. You can also do this through [patreon](https://patreon.com/nicesapien), but GitHub sponsors is preferred over Patreon as it charges less. The codebase is provided under the MIT license absolutely free of charge, forever.
 

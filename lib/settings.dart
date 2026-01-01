@@ -35,9 +35,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late Set<String> _tabs;
   String? _jwt;
 
-  // Timer Settings
   bool _immersiveMode = true;
   bool _soundVibration = true;
+
+  bool _dynamicColor = true;
+  String _themeMode = 'auto';
 
   @override
   void initState() {
@@ -47,6 +49,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _tabs = {...widget.enabledTabs};
     _safeLoadJwt();
     _safeLoadTimerSettings();
+    _safeLoadThemeSettings();
+  }
+
+  Future<void> _safeLoadThemeSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (mounted) {
+        setState(() {
+          _dynamicColor = prefs.getBool('dynamic_color') ?? true;
+          _themeMode = prefs.getString('theme_mode') ?? 'auto';
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _updateThemeSettings(String key, dynamic value) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (value is bool) {
+      await prefs.setBool(key, value);
+    } else if (value is String) {
+      await prefs.setString(key, value);
+    }
+    if (mounted) {
+      setState(() {
+        if (key == 'dynamic_color') _dynamicColor = value;
+        if (key == 'theme_mode') _themeMode = value;
+      });
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Restart app to apply theme changes fully.'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
   }
 
   Future<void> _safeLoadTimerSettings() async {
@@ -254,6 +293,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 20),
           Text(
+            'Appearance',
+            style: GoogleFonts.gabarito(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: cs.onSurfaceVariant,
+              letterSpacing: 0.2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            color: cs.surfaceContainerHigh,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: cs.outlineVariant.withOpacity(0.5)),
+            ),
+            child: Column(
+              children: [
+                SwitchListTile.adaptive(
+                  title: const Text('Dynamic Theme'),
+                  subtitle: const Text('Use wallpaper colors'),
+                  value: _dynamicColor,
+                  onChanged: (v) => _updateThemeSettings('dynamic_color', v),
+                ),
+                if (!_dynamicColor)
+                  ListTile(
+                    title: const Text('Dark Mode'),
+                    trailing: DropdownButton<String>(
+                      value: _themeMode,
+                      underline: const SizedBox(),
+                      dropdownColor: cs.surfaceContainerHigh,
+                      style: GoogleFonts.gabarito(
+                        color: cs.onSurface,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'auto', child: Text('Auto')),
+                        DropdownMenuItem(value: 'light', child: Text('Off')),
+                        DropdownMenuItem(value: 'dark', child: Text('On')),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) _updateThemeSettings('theme_mode', v);
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+          Text(
             'Timer & Focus',
             style: GoogleFonts.gabarito(
               fontSize: 14,
@@ -342,35 +433,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onChanged: (v) => _toggleTab('planner', v),
                 ),
               ],
-            ),
-          ),
-
-          const SizedBox(height: 20),
-          Text(
-            'About',
-            style: GoogleFonts.gabarito(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: cs.onSurfaceVariant,
-              letterSpacing: 0.2,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            color: cs.surfaceContainerHigh,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: cs.outlineVariant.withOpacity(0.5)),
-            ),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: () {},
-              child: const ListTile(
-                leading: Icon(Icons.info_outline),
-                title: Text('About AurAchieve'),
-                subtitle: Text('App info and credits'),
-              ),
             ),
           ),
 
