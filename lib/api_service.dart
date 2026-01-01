@@ -181,7 +181,6 @@ class ApiService {
     return const [];
   }
 
-
   Future<Map<String, dynamic>> getUserProfile() async {
     final response = await _performRequest('GET', '/api/user/profile');
 
@@ -310,9 +309,6 @@ class ApiService {
         throw Exception('Failed to update bio: ${response.body}');
       }
     }
-
-    
-    
   }
 
   Future<Map<String, dynamic>> getTasks() async {
@@ -890,7 +886,6 @@ class ApiService {
           'username': data['username'],
         };
       } else if (data is List) {
-        
         return {
           'tasks': data,
           'habits': const [],
@@ -918,8 +913,6 @@ class ApiService {
       'Content-Type': 'application/json',
     };
   }
-
-
 
   Future<void> createProfile(String name, String email) async {
     final resp = await _performRequest(

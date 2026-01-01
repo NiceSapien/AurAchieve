@@ -16,8 +16,8 @@ class SmartTip {
   final String title;
   final String content;
   final String? expandedContent;
-  final String type;  
-  final String targetTab;  
+  final String type;
+  final String targetTab;
 
   const SmartTip({
     required this.id,
@@ -244,7 +244,7 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     for (final h in rawList) {
       if (h is! Map) continue;
       final m = Map<String, dynamic>.from(h);
-       
+
       m['type'] ??= 'good';
 
       m['completedTimes'] = m['completedTimes'] ?? 0;
@@ -412,13 +412,11 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
   void _pickRandomTip() {
     if (_activeTip != null) return;
 
-     
     if (Random().nextDouble() > 0.3) return;
 
-    final availableTips =
-        _allTips
-            .where((t) => !_ignoredSuggestions.contains('tip_${t.id}'))
-            .toList();
+    final availableTips = _allTips
+        .where((t) => !_ignoredSuggestions.contains('tip_${t.id}'))
+        .toList();
 
     if (availableTips.isNotEmpty) {
       setState(() {
@@ -439,7 +437,6 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
     final now = DateTime.now();
     final threeDaysAgo = now.subtract(const Duration(days: 3));
 
-     
     for (final h in _habits) {
       if (h['type'] == 'bad') continue;
 
@@ -470,13 +467,12 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         setState(() {
           _stalledHabit = h;
           _suggestionType = 'stalled';
-          _activeTip = null;  
+          _activeTip = null;
         });
         return;
       }
     }
 
-     
     for (final h in _habits) {
       if (h['type'] == 'bad') continue;
 
@@ -491,13 +487,12 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         setState(() {
           _stalledHabit = h;
           _suggestionType = 'remove_reminders';
-          _activeTip = null;  
+          _activeTip = null;
         });
         return;
       }
     }
 
-     
     if (_stalledHabit == null) {
       _pickRandomTip();
     }
@@ -514,7 +509,6 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
         goodList = (dashboard['habits'] as List?) ?? [];
         badList = (dashboard['badHabits'] as List?) ?? [];
 
-         
         if (goodList.isEmpty) {
           try {
             goodList = await widget.apiService.getHabits();
@@ -809,7 +803,6 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                   final merged = Map<String, dynamic>.from(existing);
                   merged.addAll(updatedHabit);
 
-                   
                   if (!updatedHabit.containsKey('type')) {
                     merged['type'] = existing['type'];
                   }
@@ -1081,7 +1074,6 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                 : TabBarView(
                     controller: _tabController,
                     children: [
-                       
                       goodHabits.isEmpty &&
                               _stalledHabit == null &&
                               (_activeTip == null ||
@@ -1222,7 +1214,8 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                                                     () => _tipExpanded = true,
                                                   ),
                                                   icon: const Icon(
-                                                    Icons.keyboard_arrow_down_rounded,
+                                                    Icons
+                                                        .keyboard_arrow_down_rounded,
                                                     size: 18,
                                                   ),
                                                   label: Text(
@@ -1247,8 +1240,8 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                                                       scheme.outline,
                                                   textStyle:
                                                       GoogleFonts.gabarito(
-                                                    fontSize: 12,
-                                                  ),
+                                                        fontSize: 12,
+                                                      ),
                                                 ),
                                               ),
                                             ],
@@ -1393,7 +1386,6 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                               ),
                             ),
 
-                       
                       badHabits.isEmpty &&
                               (_activeTip == null ||
                                   _activeTip!.targetTab == 'good')
@@ -1533,7 +1525,8 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                                                     () => _tipExpanded = true,
                                                   ),
                                                   icon: const Icon(
-                                                    Icons.keyboard_arrow_down_rounded,
+                                                    Icons
+                                                        .keyboard_arrow_down_rounded,
                                                     size: 18,
                                                   ),
                                                   label: Text(
@@ -1558,8 +1551,8 @@ class _HabitsPageState extends State<HabitsPage> with TickerProviderStateMixin {
                                                       scheme.outline,
                                                   textStyle:
                                                       GoogleFonts.gabarito(
-                                                    fontSize: 12,
-                                                  ),
+                                                        fontSize: 12,
+                                                      ),
                                                 ),
                                               ),
                                             ],

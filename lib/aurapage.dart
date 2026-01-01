@@ -635,8 +635,7 @@ class _AuraPageIntroState extends State<AuraPageIntro> {
                                           builder: (context) => ShopPage(
                                             apiService: widget.apiService,
                                             currentAura: widget.aura,
-                                            onAuraSpent: (amount) {
-                                            },
+                                            onAuraSpent: (amount) {},
                                           ),
                                         ),
                                       )

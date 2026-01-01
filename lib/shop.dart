@@ -53,28 +53,26 @@ class _ShopPageState extends State<ShopPage> {
     if (isEquipped) return;
 
     if (isOwned) {
-      
       try {
         await widget.apiService.updateAuraTheme(themeKey);
         if (mounted) {
           setState(() => _currentTheme = themeKey);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Theme equipped!')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Theme equipped!')));
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to equip theme: $e')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Failed to equip theme: $e')));
         }
       }
     } else {
-      
       if (widget.currentAura < cost) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Insufficient Aura!')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Insufficient Aura!')));
         return;
       }
 
@@ -82,8 +80,9 @@ class _ShopPageState extends State<ShopPage> {
         final result = await widget.apiService.updateAuraTheme(themeKey);
         if (mounted) {
           setState(() {
-            _purchasedThemes =
-                List<String>.from(result['purchasedThemes'] ?? []);
+            _purchasedThemes = List<String>.from(
+              result['purchasedThemes'] ?? [],
+            );
             _currentTheme = result['theme'];
           });
           widget.onAuraSpent(cost);
@@ -267,8 +266,6 @@ class _ShopPageState extends State<ShopPage> {
     final isMaxedOut = maxQuantity != null && currentQuantity >= maxQuantity;
     final canAfford = widget.currentAura >= cost && !isMaxedOut;
 
-    
-    
     final isTheme = maxQuantity == null;
     final canInteract = isTheme ? true : canAfford;
 
@@ -384,12 +381,12 @@ class _ShopPageState extends State<ShopPage> {
                     color: isMaxedOut
                         ? scheme.surfaceContainerHighest
                         : (isOwned
-                            ? (isEquipped
-                                ? scheme.surfaceContainerHighest
-                                : scheme.primaryContainer)
-                            : (canAfford
-                                ? scheme.primaryContainer
-                                : scheme.surfaceContainerHighest)),
+                              ? (isEquipped
+                                    ? scheme.surfaceContainerHighest
+                                    : scheme.primaryContainer)
+                              : (canAfford
+                                    ? scheme.primaryContainer
+                                    : scheme.surfaceContainerHighest)),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(

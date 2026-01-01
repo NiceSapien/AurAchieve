@@ -138,7 +138,7 @@ class _ProfilePageState extends State<ProfilePage> {
     try {
       final tempDir = Directory.systemTemp;
       final targetPath = '${tempDir.path}/temp_pfp.webp';
-      
+
       final targetFile = File(targetPath);
       if (await targetFile.exists()) {
         await targetFile.delete();
@@ -179,7 +179,11 @@ class _ProfilePageState extends State<ProfilePage> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile picture updated! It may take a few minutes to appear on your Aura Page.')),
+          const SnackBar(
+            content: Text(
+              'Profile picture updated! It may take a few minutes to appear on your Aura Page.',
+            ),
+          ),
         );
         setState(() {});
       }
@@ -197,7 +201,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _showEditNameDialog() async {
     final controller = TextEditingController(text: _user?.name);
     final scheme = Theme.of(context).colorScheme;
-    
+
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -221,16 +225,16 @@ class _ProfilePageState extends State<ProfilePage> {
                 await widget.apiService.updateName(controller.text);
                 if (mounted) {
                   Navigator.pop(context);
-                  _fetchUser(); 
+                  _fetchUser();
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Name updated successfully')),
                   );
                 }
               } catch (e) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error: $e')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('Error: $e')));
                 }
               }
             },
@@ -358,7 +362,10 @@ class _ProfilePageState extends State<ProfilePage> {
                                   'https://cloud.appwrite.io/v1/storage/buckets/69538a24001337545e6b/files/$username/view?project=6800a2680008a268a6a3',
                                 )
                               : null,
-                          onForegroundImageError: _user != null && username != null ? (_, __) {} : null,
+                          onForegroundImageError:
+                              _user != null && username != null
+                              ? (_, __) {}
+                              : null,
                           child: Text(
                             _user?.name.isNotEmpty == true
                                 ? _user!.name[0].toUpperCase()
@@ -378,7 +385,10 @@ class _ProfilePageState extends State<ProfilePage> {
                             decoration: BoxDecoration(
                               color: scheme.primary,
                               shape: BoxShape.circle,
-                              border: Border.all(color: scheme.surface, width: 2),
+                              border: Border.all(
+                                color: scheme.surface,
+                                width: 2,
+                              ),
                             ),
                             child: Icon(
                               Icons.edit_rounded,

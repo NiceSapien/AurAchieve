@@ -189,7 +189,9 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
           data: Theme.of(context).copyWith(
             timePickerTheme: TimePickerThemeData(
               helpTextStyle: TextStyle(
-                color: isDark ? Colors.white : Theme.of(context).colorScheme.onSurface,
+                color: isDark
+                    ? Colors.white
+                    : Theme.of(context).colorScheme.onSurface,
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
               ),
@@ -225,7 +227,6 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
       final date = DateTime.parse(dateStr);
       final tasks = day['tasks'] as List;
 
-      
       bool isBreak = tasks.any((t) => t['type'] == 'break');
       if (isBreak) continue;
 
@@ -762,9 +763,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
       });
     }
     if (_currentPage == 3 && _deadline == null) return false;
-    
-    
-    
+
     return true;
   }
 
@@ -1040,7 +1039,9 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         title: Text(
           'Options',
           style: TextStyle(
-            color: isDark ? Colors.white : Theme.of(context).colorScheme.onSurface,
+            color: isDark
+                ? Colors.white
+                : Theme.of(context).colorScheme.onSurface,
           ),
         ),
         children: [
@@ -1181,7 +1182,9 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
           orElse: () => Subject(
             name: subjectName,
             icon: _getIconForSubject(subjectName),
-            color: _subjectColors[subjectName.hashCode.abs() % _subjectColors.length],
+            color:
+                _subjectColors[subjectName.hashCode.abs() %
+                    _subjectColors.length],
           ),
         );
 
@@ -1213,7 +1216,9 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
           orElse: () => Subject(
             name: subjectName,
             icon: _getIconForSubject(subjectName),
-            color: _subjectColors[subjectName.hashCode.abs() % _subjectColors.length],
+            color:
+                _subjectColors[subjectName.hashCode.abs() %
+                    _subjectColors.length],
           ),
         );
 
@@ -1248,10 +1253,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: CircleAvatar(
           backgroundColor: avatarColor.withValues(alpha: 0.2),
-          child: Icon(
-            icon,
-            color: avatarColor,
-          ),
+          child: Icon(icon, color: avatarColor),
         ),
         title: DefaultTextStyle(
           style: GoogleFonts.gabarito(
@@ -1441,7 +1443,9 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
                     leading: IconButton(
                       icon: Icon(
                         subject.icon,
-                        color: _subjectColors[subject.name.hashCode.abs() % _subjectColors.length],
+                        color:
+                            _subjectColors[subject.name.hashCode.abs() %
+                                _subjectColors.length],
                       ),
                       onPressed: () => _changeSubjectIcon(subject),
                       tooltip: "Change Icon",

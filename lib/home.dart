@@ -330,8 +330,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _fetchDataFromServer() async {
     if (!mounted || _refreshInFlight) return;
     _refreshInFlight = true;
-    
-    
+
     if (tasks.isEmpty && _preloadedHabits.isEmpty) {
       setState(() {
         isLoading = true;
@@ -340,7 +339,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     try {
-      
       final dashboard = await _apiService.getTasksAndHabits().timeout(
         const Duration(seconds: 20),
         onTimeout: () {
@@ -350,13 +348,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
       List<dynamic> badHabits = (dashboard['badHabits'] as List?) ?? [];
       if (badHabits.isEmpty) {
-        try {
-          
-          
-          
-          
-          
-        } catch (e) {
+        try {} catch (e) {
           debugPrint('Failed to fetch bad habits: $e');
         }
       } else {
@@ -2046,8 +2038,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final today = DateUtils.dateOnly(DateTime.now());
     return DateFormat('yyyy-MM-dd').format(today);
   }
-
-
 
   Widget _materialYouTaskIcon(String intensity, BuildContext context) {
     final cs = Theme.of(context).colorScheme;
