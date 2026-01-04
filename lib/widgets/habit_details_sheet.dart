@@ -603,7 +603,7 @@ class _HabitDetailsSheetState extends State<HabitDetailsSheet> {
                                   fontSize: 14,
                                   fontWeight: FontWeight.w500,
                                   height: 1.3,
-                                  color: cs2.onSurfaceVariant,
+                                  color: cs2.onSurface,
                                 ),
                               ),
                               actionsPadding: const EdgeInsets.fromLTRB(

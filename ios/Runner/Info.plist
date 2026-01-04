@@ -4,6 +4,10 @@
 <dict>
 <key>NSCameraUsageDescription</key>
 <string>This app needs camera access to take task completion photos.</string>
+<key>NSMicrophoneUsageDescription</key>
+<string>This app needs microphone access to record audio memories.</string>
+<key>NSPhotoLibraryUsageDescription</key>
+<string>This app needs photo library access to upload photos and videos to memories.</string>
 <key>NSAppTransportSecurity</key>
 <dict>
   <key>NSAllowsArbitraryLoads</key>

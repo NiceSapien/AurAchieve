@@ -85,7 +85,6 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
 
   void _addTimeFromString(String s) {
     try {
-       
       final dt = _parseTime(s);
       if (dt != null) {
         final tod = TimeOfDay.fromDateTime(dt);
@@ -100,8 +99,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
 
   DateTime? _parseTime(String s) {
     final now = DateTime.now();
-     
-     
+
     try {
       final parts = s.split(' ');
       final timeParts = parts[0].split(':');
@@ -125,14 +123,12 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       String timeZoneName = localTimezone.toString();
       debugPrint('Raw timezone string: $timeZoneName');
 
-       
       final RegExp regex = RegExp(r'([A-Za-z]+/[A-Za-z_]+)');
       final match = regex.firstMatch(timeZoneName);
 
       if (match != null) {
         timeZoneName = match.group(1)!;
       } else {
-         
         if (timeZoneName.startsWith('TimezoneInfo(')) {
           final split = timeZoneName.split(',');
           if (split.isNotEmpty) {
@@ -145,9 +141,9 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       debugPrint('Timezone set to: $timeZoneName');
     } catch (e) {
       debugPrint('Could not get local timezone: $e');
-       
+
       try {
-        tz.setLocalLocation(tz.getLocation('Asia/Kolkata'));  
+        tz.setLocalLocation(tz.getLocation('Asia/Kolkata'));
         debugPrint('Fallback to Asia/Kolkata');
       } catch (_) {
         tz.setLocalLocation(tz.getLocation('UTC'));
@@ -167,16 +163,11 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
     final bool? androidResult = await androidImplementation
         ?.requestNotificationsPermission();
 
-     
     final exactAlarmStatus = await androidImplementation
         ?.requestExactAlarmsPermission();
     debugPrint('Exact Alarm Permission Status: $exactAlarmStatus');
 
-     
-    if (exactAlarmStatus == false) {
-       
-       
-    }
+    if (exactAlarmStatus == false) {}
 
     final iosImplementation = flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<
@@ -228,7 +219,6 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       android: androidNotificationDetails,
     );
 
-     
     final androidImplementation = flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
@@ -242,15 +232,6 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       ),
     );
 
-     
-     
-     
-     
-     
-     
-     
-     
-
     if (anyDaySelected && _selectedTimes.isNotEmpty) {
       int notificationIdOffset = 0;
       for (final time in _selectedTimes) {
@@ -259,7 +240,6 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
             final day = i + 1;
             final scheduledDate = _nextInstanceOf(day, time);
 
-             
             final notificationId = habitId.hashCode + notificationIdOffset;
             notificationIdOffset++;
 
@@ -288,7 +268,6 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
       String habitId;
       if (widget.existingHabitId != null) {
         habitId = widget.existingHabitId!;
-         
       } else {
         final created = await widget.apiService.createHabit(
           habitName: widget.habitName,
@@ -320,9 +299,7 @@ class _ReminderSetupScreenState extends State<ReminderSetupScreen> {
           await widget.apiService.saveHabitReminderLocal(habitId, selected);
           await _scheduleNotification(habitId, widget.habitName);
         } else {
-           
           await widget.apiService.saveHabitReminderLocal(habitId, []);
-           
         }
       }
 

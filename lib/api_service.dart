@@ -13,7 +13,7 @@ dynamic _parseJson(String jsonString) {
 
 class AppConfig {
   static const String defaultBaseUrl =
-      'https://auraascend-fgf4aqf5gubgacb3.centralindia-01.azurewebsites.net';
+      'https://ubiquitous-waddle-557rj9965pwh7q7g-3000.app.github.dev';
   static String baseUrl = defaultBaseUrl;
 
   static const String defaultAppwriteEndpoint =
@@ -619,16 +619,18 @@ class ApiService {
     List<String>? completedDays,
   }) async {
     final cdJson = jsonEncode(completedDays ?? <String>[]);
+    final body = {
+      'habitName': habitName,
+      'habitGoal': habitGoal,
+      'habitLocation': habitLocation,
+      'createdAt': (createdAt ?? DateTime.now()).toIso8601String(),
+      'completedDays': cdJson,
+    };
+
     final response = await _performRequest(
       'POST',
       '/api/habit',
-      body: jsonEncode({
-        'habitName': habitName,
-        'habitGoal': habitGoal,
-        'habitLocation': habitLocation,
-        'createdAt': (createdAt ?? DateTime.now()).toIso8601String(),
-        'completedDays': cdJson,
-      }),
+      body: jsonEncode(body),
     );
     if (response.statusCode == 200 || response.statusCode == 201) {
       return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
@@ -884,6 +886,7 @@ class ApiService {
           'lastValidationResetDate': data['lastValidationResetDate'],
           'quote': data['quote'],
           'username': data['username'],
+          'e2e': data['e2e'],
         };
       } else if (data is List) {
         return {
@@ -906,6 +909,129 @@ class ApiService {
     throw Exception('Failed to fetch tasks: ${resp.statusCode} ${resp.body}');
   }
 
+  Future<void> setupMemoryLanes({required bool e2e}) async {
+    final response = await _performRequest(
+      'POST',
+      '/api/memory-lanes/setup',
+      body: jsonEncode({'e2e': e2e}),
+    );
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception('Failed to setup Memory Lanes: ${response.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> createMemory({
+    required String name,
+    required String description,
+    required bool isPublic,
+    String? tag,
+    String? tagColor,
+    String? mood,
+    String? createdAt,
+    List<String>? files,
+  }) async {
+    final body = {
+      'name': name,
+      'description': description,
+      'public': isPublic,
+      'createdAt': createdAt ?? DateTime.now().toIso8601String(),
+    };
+    if (tag != null) body['tag'] = tag;
+    if (tagColor != null) body['tagColor'] = tagColor;
+    if (mood != null) body['mood'] = mood;
+    if (files != null) body['files'] = files;
+
+    final response = await _performRequest(
+      'POST',
+      '/api/memory-lanes',
+      body: jsonEncode(body),
+    );
+
+    if (response.statusCode == 201) {
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to create memory: ${response.body}');
+    }
+  }
+
+  Future<String> uploadMemoryFile(File file, String fileId, {bool isPublic = false}) async {
+    try {
+      List<String>? permissions;
+      if (isPublic) {
+        final user = await account.get();
+        permissions = [
+          Permission.read(Role.any()),
+          Permission.read(Role.user(user.$id)),
+          Permission.update(Role.user(user.$id)),
+          Permission.delete(Role.user(user.$id)),
+        ];
+      }
+
+      final result = await storage.createFile(
+        bucketId: '6957d8c0001c106bf6cf',
+        fileId: fileId,
+        file: InputFile.fromPath(path: file.path, filename: fileId),
+        permissions: permissions,
+      );
+      return result.$id;
+    } catch (e) {
+      throw Exception('Failed to upload file: $e');
+    }
+  }
+
+  Future<void> deleteFile(String fileId) async {
+    try {
+      await storage.deleteFile(
+        bucketId: '6957d8c0001c106bf6cf',
+        fileId: fileId,
+      );
+    } catch (e) {
+      throw Exception('Failed to delete file: $e');
+    }
+  }
+
+  Future<void> deleteMemory(String memoryId, {List<String>? fileIds}) async {
+    if (fileIds != null) {
+      for (final fileId in fileIds) {
+        try {
+          await deleteFile(fileId);
+        } catch (e) {
+          print('Failed to delete file $fileId: $e');
+          
+        }
+      }
+    }
+
+    final endpoint = '/api/memory-lanes/$memoryId';
+    final response = await _performRequest('DELETE', endpoint);
+    if (response.statusCode == 200) return;
+    if (response.statusCode == 404) throw Exception('Memory not found');
+    throw Exception('Failed to delete memory: ${response.statusCode} ${response.body}');
+  }
+
+  Future<List<dynamic>> getMemories({int? length}) async {
+    String endpoint = '/api/memory-lanes';
+    if (length != null) {
+      endpoint += '?length=$length';
+    }
+    
+    final response = await _performRequest('GET', endpoint);
+
+    if (response.statusCode == 200) {
+      final data = await compute(_parseJson, response.body);
+      if (data is List) return data;
+      if (data is Map<String, dynamic>) {
+        if (data.containsKey('memories')) return data['memories'] as List;
+        if (data.containsKey('data')) return data['data'] as List;
+        if (data.containsKey('items')) return data['items'] as List;
+        if (data.containsKey('documents')) return data['documents'] as List;
+      }
+      return [];
+    } else {
+      throw Exception('Failed to load memories: ${response.body}');
+    }
+  }
+
   Future<Map<String, String>> _getHeaders({bool forceRefresh = false}) async {
     final token = await getJwtToken(forceRefresh: forceRefresh);
     return {
@@ -918,7 +1044,7 @@ class ApiService {
     final resp = await _performRequest(
       'POST',
       '/api/users',
-      body: {'name': name, 'email': email},
+      body: jsonEncode({'name': name, 'email': email}),
     );
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw Exception(

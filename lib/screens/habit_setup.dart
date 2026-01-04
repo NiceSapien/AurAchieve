@@ -311,7 +311,9 @@ class _HabitSetupState extends State<HabitSetup> {
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: [_buildEditableSentence()],
+                  children: [
+                    _buildEditableSentence(),
+                  ],
                 ),
               ),
             ),

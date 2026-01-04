@@ -2,7 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:dynamic_color/dynamic_color.dart';
-import 'package:appwrite/appwrite.dart';
+import 'package:appwrite/appwrite.dart' as appwrite;
 import 'package:appwrite/models.dart' as models;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -14,6 +14,8 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 
 import 'theme.dart';
 import 'home.dart';
@@ -86,17 +88,17 @@ void main() async {
 
   await AppConfig.loadFromPrefs();
 
-  Client client = Client();
+  appwrite.Client client = appwrite.Client();
   client
       .setEndpoint(AppConfig.appwriteEndpoint)
       .setProject(AppConfig.appwriteProjectId)
       .setSelfSigned(status: true);
-  Account account = Account(client);
+  appwrite.Account account = appwrite.Account(client);
   runApp(MyApp(account: account));
 }
 
 class MyApp extends StatefulWidget {
-  final Account account;
+  final appwrite.Account account;
   const MyApp({super.key, required this.account});
 
   @override
@@ -174,7 +176,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             useMaterial3: true,
           ),
           themeMode: mode,
-
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+            FlutterQuillLocalizations.delegate,
+          ],
+          supportedLocales: const [Locale('en', 'US')],
           builder: (context, child) {
             final brightness = MediaQuery.of(context).platformBrightness;
             final isDarkMode = mode == ThemeMode.system
@@ -203,7 +211,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 }
 
 class AuthCheck extends StatefulWidget {
-  final Account account;
+  final appwrite.Account account;
   const AuthCheck({super.key, required this.account});
 
   @override
@@ -261,7 +269,7 @@ class _AuthCheckState extends State<AuthCheck> {
 }
 
 class AuraOnboarding extends StatefulWidget {
-  final Account account;
+  final appwrite.Account account;
   const AuraOnboarding({super.key, required this.account});
 
   @override
@@ -585,7 +593,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
     setState(() => isBusy = true);
     try {
       await widget.account.create(
-        userId: ID.unique(),
+        userId: appwrite.ID.unique(),
         email: emailController.text.trim(),
         password: passwordController.text,
         name: nameController.text.trim(),

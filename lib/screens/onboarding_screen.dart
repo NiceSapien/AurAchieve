@@ -61,8 +61,8 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
   Future<void> register() async {
     setState(() => isBusy = true);
     try {
-      await widget.account.create(
-        userId: ID.unique(),
+        await widget.account.create(
+          userId: ID.unique(),
         email: emailController.text.trim(),
         password: passwordController.text,
         name: nameController.text.trim(),

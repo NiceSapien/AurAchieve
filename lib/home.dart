@@ -24,6 +24,7 @@ import 'widgets/habit_details_sheet.dart';
 import 'shop.dart';
 import 'settings.dart';
 import 'profile.dart';
+import 'memorylanes.dart';
 
 enum AuraHistoryView { day, month, year }
 
@@ -176,6 +177,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String? _taskLoadError;
   String? _quoteText;
   String? _quoteAuthor;
+  String? _memoryLanesE2E;
 
   @override
   void initState() {
@@ -386,6 +388,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _userProfile = {'username': dashboard['username']};
         }
 
+        if (dashboard['e2e'] != null) {
+          _memoryLanesE2E = dashboard['e2e'].toString();
+        }
+
         final auraValue = dashboard['aura'];
         if (auraValue is num) {
           aura = auraValue.toInt();
@@ -419,6 +425,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> logout() async {
     try {
       await widget.account.deleteSession(sessionId: 'current');
+      await _storage.delete(key: 'memory_lanes_password');
     } catch (_) {}
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -1001,6 +1008,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       },
       child: Scaffold(
         appBar: AppBar(
+          key: ValueKey(_selectedIndex),
           elevation: 0,
           backgroundColor: Theme.of(context).colorScheme.surface,
           leading: Padding(
@@ -1061,6 +1069,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
           centerTitle: true,
           actions: [
+            IconButton(
+              icon: Icon(
+                Icons.auto_stories_rounded,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                size: 28,
+              ),
+              tooltip: 'Memory Lanes',
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder:
+                        (_) => MemoryLanesPage(
+                          apiService: _apiService,
+                          e2eStatus: _memoryLanesE2E,
+                        ),
+                  ),
+                );
+                
+                _fetchDataFromServer();
+              },
+            ),
             IconButton(
               icon: Icon(
                 Icons.account_circle_rounded,

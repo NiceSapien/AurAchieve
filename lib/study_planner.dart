@@ -1024,7 +1024,7 @@ class _StudyPlannerScreenState extends State<StudyPlannerScreen> {
         heroTag: 'planner_options_fab',
         onPressed: _showOptionsDialog,
         label: const Text('Options'),
-        icon: const Icon(Icons.menu_rounded),
+        icon: const Icon(Icons.tune_rounded),
         backgroundColor: Theme.of(context).colorScheme.primaryContainer,
         foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
       ),

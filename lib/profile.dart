@@ -444,6 +444,21 @@ class _ProfilePageState extends State<ProfilePage> {
                     icon: Icons.auto_awesome_rounded,
                     title: 'Aura Page',
                     color: Colors.purple,
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: scheme.error,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        'New',
+                        style: GoogleFonts.gabarito(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: scheme.onError,
+                        ),
+                      ),
+                    ),
                     onTap: () {
                       Navigator.push(
                         context,
@@ -545,6 +560,7 @@ class _ProfilePageState extends State<ProfilePage> {
     required String title,
     required Color color,
     required VoidCallback onTap,
+    Widget? trailing,
   }) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
@@ -571,9 +587,18 @@ class _ProfilePageState extends State<ProfilePage> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        trailing: Icon(
-          Icons.chevron_right_rounded,
-          color: scheme.onSurfaceVariant,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (trailing != null) ...[
+              trailing,
+              const SizedBox(width: 8),
+            ],
+            Icon(
+              Icons.chevron_right_rounded,
+              color: scheme.onSurfaceVariant,
+            ),
+          ],
         ),
         onTap: onTap,
       ),
