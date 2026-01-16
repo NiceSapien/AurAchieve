@@ -12,6 +12,7 @@ import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -431,28 +432,66 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                     .get(Uri.parse(url))
                     .timeout(const Duration(seconds: 5));
 
-                if (response.statusCode == 200 &&
-                    response.body == 'feel alive.') {
-                  AppConfig.setBaseUrl(url);
-                  AppConfig.setAppwriteConfig(awEndpoint, awProject);
-                  await AppConfig.saveToPrefs();
+                if (response.statusCode == 200) {
+                  try {
+                    
+                    final Map<String, dynamic> data = jsonDecode(response.body);
+                    final String? autoEndpoint = data['appwriteEndpoint'];
+                    final String? autoProject = data['appwriteProjectId'];
 
-                  widget.account.client
-                      .setEndpoint(awEndpoint)
-                      .setProject(awProject);
+                    if (autoEndpoint != null && autoProject != null) {
+                      AppConfig.setBaseUrl(url);
+                      AppConfig.setAppwriteConfig(autoEndpoint, autoProject);
+                      await AppConfig.saveToPrefs();
 
-                  if (mounted) {
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Settings updated successfully.'),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
+                      widget.account.client
+                          .setEndpoint(autoEndpoint)
+                          .setProject(autoProject);
+
+                      if (mounted) {
+                        Navigator.of(context).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Connected and configured successfully!',
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                      return;
+                    }
+                  } catch (_) {
+                    
+                  }
+
+                  if (response.body == 'feel alive.') {
+                    AppConfig.setBaseUrl(url);
+                    AppConfig.setAppwriteConfig(awEndpoint, awProject);
+                    await AppConfig.saveToPrefs();
+
+                    widget.account.client
+                        .setEndpoint(awEndpoint)
+                        .setProject(awProject);
+
+                    if (mounted) {
+                      Navigator.of(context).pop();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Settings updated successfully.'),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
+                  } else {
+                    setState(() {
+                      errorText = 'Invalid server response.';
+                      isLoading = false;
+                    });
                   }
                 } else {
                   setState(() {
-                    errorText = 'Invalid endpoint or server not responding.';
+                    errorText = 'Server error: ${response.statusCode}';
                     isLoading = false;
                   });
                 }
@@ -487,58 +526,13 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                       enabled: !isLoading,
                     ),
                     const SizedBox(height: 16),
-                    InkWell(
-                      onTap: () => setState(
-                        () => showAppwriteSettings = !showAppwriteSettings,
-                      ),
-                      borderRadius: BorderRadius.circular(8),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Row(
-                          children: [
-                            Icon(
-                              showAppwriteSettings
-                                  ? Icons.arrow_drop_down_rounded
-                                  : Icons.arrow_right_rounded,
-                              color: theme.colorScheme.primary,
-                            ),
-                            Text(
-                              'Appwrite Settings',
-                              style: TextStyle(
-                                color: theme.colorScheme.primary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
+                    Text(
+                      'Appwrite configuration will be fetched from server automatically.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    if (showAppwriteSettings) ...[
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: endpointController,
-                        decoration: InputDecoration(
-                          labelText: 'Appwrite Endpoint',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        style: TextStyle(color: theme.colorScheme.onSurface),
-                        enabled: !isLoading,
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: projectIdController,
-                        decoration: InputDecoration(
-                          labelText: 'Project ID',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        style: TextStyle(color: theme.colorScheme.onSurface),
-                        enabled: !isLoading,
-                      ),
-                    ],
                   ],
                 ),
               ),

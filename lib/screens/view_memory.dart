@@ -43,7 +43,6 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
         readOnly: true,
       );
     } catch (e) {
-      
       _quillController = quill.QuillController(
         document: quill.Document()..insert(0, description),
         selection: const TextSelection.collapsed(offset: 0),
@@ -113,8 +112,8 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
           statusBarColor: Colors.transparent,
           statusBarIconBrightness:
               Theme.of(context).brightness == Brightness.dark
-                  ? Brightness.light
-                  : Brightness.dark,
+              ? Brightness.light
+              : Brightness.dark,
         ),
         leading: IconButton(
           icon: Icon(Icons.arrow_back_rounded, color: colorScheme.onSurface),
@@ -197,11 +196,15 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                   builder: (_) => AlertDialog(
                     title: Text(
                       'Delete memory?',
-                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
                     ),
                     content: Text(
                       'This will permanently delete the memory.',
-                      style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     actions: [
                       TextButton(
@@ -220,7 +223,7 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                     if (widget.apiService == null) {
                       throw Exception('API service unavailable');
                     }
-                    
+
                     await widget.apiService!.deleteMemory(id);
                     if (context.mounted && Navigator.canPop(context)) {
                       Navigator.of(context).pop(true);
@@ -285,7 +288,9 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                     decoration: BoxDecoration(
                       color: tagColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: tagColor.withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: tagColor.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Text(
                       tag,
@@ -298,14 +303,14 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                   ),
                   if (mood != null && mood.toString().isNotEmpty) ...[
                     const SizedBox(width: 8),
-                    
                   ],
                 ],
               ),
             ],
-            if ((tag == null || tag.toString().isEmpty) && mood != null && mood.toString().isNotEmpty) ...[
-               const SizedBox(height: 16),
-               
+            if ((tag == null || tag.toString().isEmpty) &&
+                mood != null &&
+                mood.toString().isNotEmpty) ...[
+              const SizedBox(height: 16),
             ],
             const SizedBox(height: 32),
             if (files.isNotEmpty) ...[
@@ -355,8 +360,6 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
   }
 }
 
-
-
 class _MediaItem extends StatefulWidget {
   final String fileId;
   final ApiService? apiService;
@@ -380,8 +383,9 @@ class _MediaItemState extends State<_MediaItem> {
   @override
   void initState() {
     super.initState();
-    _url = '${AppConfig.appwriteEndpoint}/storage/buckets/6957d8c0001c106bf6cf/files/${widget.fileId}/view?project=${AppConfig.appwriteProjectId}';
-    
+    _url =
+        '${AppConfig.appwriteEndpoint}/storage/buckets/6957d8c0001c106bf6cf/files/${widget.fileId}/view?project=${AppConfig.appwriteProjectId}';
+
     if (widget.fileId.startsWith('image')) {
       _type = 'image';
     } else if (widget.fileId.startsWith('video')) {
@@ -420,7 +424,6 @@ class _MediaItemState extends State<_MediaItem> {
           aspectRatio: _videoController!.value.aspectRatio,
         );
       } else if (_type == 'audio') {
-        
         if (widget.apiService != null) {
           final bytes = await widget.apiService!.storage.getFileView(
             bucketId: '6957d8c0001c106bf6cf',
@@ -448,8 +451,7 @@ class _MediaItemState extends State<_MediaItem> {
     _videoController?.dispose();
     _chewieController?.dispose();
     _audioPlayer.dispose();
-    
-    
+
     super.dispose();
   }
 
@@ -630,13 +632,14 @@ class _MediaItemState extends State<_MediaItem> {
                                       child: SliderTheme(
                                         data: SliderThemeData(
                                           trackHeight: 2,
-                                          thumbShape: const RoundSliderThumbShape(
-                                            enabledThumbRadius: 6,
-                                          ),
+                                          thumbShape:
+                                              const RoundSliderThumbShape(
+                                                enabledThumbRadius: 6,
+                                              ),
                                           overlayShape:
                                               const RoundSliderOverlayShape(
-                                            overlayRadius: 12,
-                                          ),
+                                                overlayRadius: 12,
+                                              ),
                                         ),
                                         child: Slider(
                                           value: position.inSeconds

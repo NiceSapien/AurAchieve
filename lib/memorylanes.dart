@@ -7,6 +7,7 @@ import 'api_service.dart';
 import 'screens/create_memory.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'screens/view_memory.dart';
+import 'lock.dart';
 
 class MemoryLanesPage extends StatefulWidget {
   final ApiService apiService;
@@ -35,7 +36,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   final _storage = const FlutterSecureStorage();
   final _unlockPasswordController = TextEditingController();
 
-  
   bool _isPinLocked = false;
   String? _pin;
   final _pinController = TextEditingController();
@@ -44,25 +44,25 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   Map<int, Map<int, Map<int, List<dynamic>>>> _groupedMemories = {};
   final Set<int> _collapsedYears = {};
   final Set<String> _collapsedMonths = {};
-  final Set<String> _expandedStacks = {}; 
+  final Set<String> _expandedStacks = {};
   final ScrollController _scrollController = ScrollController();
   bool _isLoadingMore = false;
   bool _hasMore = true;
 
   final List<Color> _monthColors = [
     Colors.transparent,
-    const Color(0xFFE57373), 
-    const Color(0xFFF06292), 
-    const Color(0xFFBA68C8), 
-    const Color(0xFF9575CD), 
-    const Color(0xFF7986CB), 
-    const Color(0xFF64B5F6), 
-    const Color(0xFF4FC3F7), 
-    const Color(0xFF4DD0E1), 
-    const Color(0xFF4DB6AC), 
-    const Color(0xFF81C784), 
-    const Color(0xFFFFB74D), 
-    const Color(0xFFFF8A65), 
+    const Color(0xFFE57373),
+    const Color(0xFFF06292),
+    const Color(0xFFBA68C8),
+    const Color(0xFF9575CD),
+    const Color(0xFF7986CB),
+    const Color(0xFF64B5F6),
+    const Color(0xFF4FC3F7),
+    const Color(0xFF4DD0E1),
+    const Color(0xFF4DB6AC),
+    const Color(0xFF81C784),
+    const Color(0xFFFFB74D),
+    const Color(0xFFFF8A65),
   ];
 
   void _groupMemoriesList() {
@@ -156,7 +156,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     try {
       final memories = await widget.apiService.getMemories();
 
-      
       if (_localE2eStatus == 'true' &&
           _unlockPasswordController.text.isNotEmpty) {
         final key = encrypt.Key.fromUtf8(
@@ -220,7 +219,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
           setState(() => _hasMore = false);
         } else {
           setState(() {
-            
             final existingIds = _memories.map((m) => m['\$id']).toSet();
             final uniqueNew = newMemories
                 .where((m) => !existingIds.contains(m['\$id']))
@@ -236,7 +234,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
         }
       }
     } catch (e) {
-      
     } finally {
       if (mounted) setState(() => _isLoadingMore = false);
     }
@@ -266,7 +263,18 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     final colorScheme = Theme.of(context).colorScheme;
 
     if (_isPinLocked) {
-      return _buildPinLockScreen(context, colorScheme);
+      return LockScreen(
+        onPinEntered: (enteredPin) async {
+          if (enteredPin == _pin) {
+            setState(() => _isPinLocked = false);
+            return true;
+          } else {
+             
+             return false;
+          }
+        },
+        onCancel: () => Navigator.pop(context),
+      );
     }
 
     if (_localE2eStatus == 'true' && !_isUnlocked) {
@@ -379,9 +387,8 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                 ),
                 itemCount: 12,
                 itemBuilder: (context, index) {
-                  if (index == 9) return const SizedBox(); 
+                  if (index == 9) return const SizedBox();
                   if (index == 11) {
-                    
                     return InkWell(
                       onTap: () {
                         if (_pinController.text.isNotEmpty) {
@@ -457,84 +464,68 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   }
 
   Future<void> _showPinSetupDialog() async {
-    final isPinSet = _pin != null;
-    final controller = TextEditingController();
-
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          isPinSet ? 'Manage PIN' : 'Set PIN',
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isPinSet) ...[
-              Text(
-                'PIN is currently enabled.',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.tonal(
-                onPressed: () async {
-                  await _storage.delete(key: 'memory_lanes_pin');
-                  setState(() => _pin = null);
-                  if (context.mounted) Navigator.pop(context);
-                },
-                child: const Text('Remove PIN'),
-              ),
-            ] else ...[
-              Text(
-                'Set a 4-digit PIN to lock Memory Lanes.',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                obscureText: true,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 24,
-                  letterSpacing: 8,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-                decoration: const InputDecoration(
-                  hintText: '****',
-                  border: OutlineInputBorder(),
-                  counterText: '',
-                ),
-              ),
-            ],
+    
+    if (_pin != null) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(
+            'Remove PIN',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+          ),
+          content: Text(
+            'Are you sure you want to remove the PIN lock?',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Remove'),
+            ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          if (!isPinSet)
-            FilledButton(
-              onPressed: () async {
-                if (controller.text.length == 4) {
-                  await _storage.write(
-                    key: 'memory_lanes_pin',
-                    value: controller.text,
-                  );
-                  setState(() => _pin = controller.text);
-                  if (context.mounted) Navigator.pop(context);
-                }
-              },
-              child: const Text('Set PIN'),
-            ),
-        ],
+      );
+
+      if (confirm == true) {
+        await _storage.delete(key: 'memory_lanes_pin');
+        setState(() => _pin = null);
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('PIN removed')));
+        }
+      }
+      return;
+    }
+
+    
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => LockScreen(
+          isSetup: true,
+          title: 'Set a PIN',
+          onPinEntered: (newPin) async {
+            await _storage.write(key: 'memory_lanes_pin', value: newPin);
+            if (mounted) {
+              setState(() {
+                _pin = newPin;
+                
+                _isPinLocked = false;
+              });
+              Navigator.pop(context); 
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('PIN setup successfully')),
+              );
+            }
+            return true;
+          },
+        ),
       ),
     );
   }
@@ -657,7 +648,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(16),
-      itemCount: years.length + 1, 
+      itemCount: years.length + 1,
       itemBuilder: (context, index) {
         if (index == years.length) {
           return _isLoadingMore
@@ -665,11 +656,11 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                   padding: EdgeInsets.all(16.0),
                   child: Center(child: CircularProgressIndicator()),
                 )
-              : const SizedBox(height: 80); 
+              : const SizedBox(height: 80);
         }
 
         final year = years[index];
-        
+
         return _buildYearContent(context, colorScheme, year);
       },
     );
@@ -687,12 +678,10 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
       children: months.map((month) {
         final monthKey = '$year-$month';
         final isCollapsed = _collapsedMonths.contains(monthKey);
-        final monthColor = _monthColors[month];
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            
             InkWell(
               onTap: () => setState(() {
                 if (isCollapsed) {
@@ -710,7 +699,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                       style: GoogleFonts.gabarito(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: monthColor,
+                        color: colorScheme.primary,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -719,13 +708,13 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                       style: GoogleFonts.gabarito(
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
-                        color: colorScheme.outline.withValues(alpha: 0.5),
+                        color: colorScheme.outline.withOpacity(0.5),
                       ),
                     ),
                     const Spacer(),
                     Icon(
                       isCollapsed ? Icons.expand_more : Icons.expand_less,
-                      color: monthColor,
+                      color: colorScheme.primary,
                     ),
                   ],
                 ),
@@ -752,7 +741,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     return Column(
       children: days.map((day) {
         final memories = _groupedMemories[year]![month]![day]!;
-        
+
         memories.sort(
           (a, b) => (b['createdAt'] ?? '').compareTo(a['createdAt'] ?? ''),
         );
@@ -761,7 +750,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              
               SizedBox(
                 width: 40,
                 child: Column(
@@ -789,7 +777,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                 ),
               ),
 
-              
               SizedBox(
                 width: 30,
                 child: Stack(
@@ -805,7 +792,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                       width: 10,
                       height: 10,
                       decoration: BoxDecoration(
-                        color: _monthColors[month],
+                        color: colorScheme.primary,
                         shape: BoxShape.circle,
                         border: Border.all(
                           color: colorScheme.surface,
@@ -817,7 +804,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                 ),
               ),
 
-              
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 16.0),
@@ -860,7 +846,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                
                 InkWell(
                   onTap: () => setState(() => _expandedStacks.remove(stackKey)),
                   child: Padding(
@@ -884,7 +869,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                     ),
                   ),
                 ),
-                
+
                 ...memories.map(
                   (memory) => Padding(
                     padding: const EdgeInsets.only(bottom: 8.0),
@@ -902,15 +887,16 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
               onTap: () => setState(() => _expandedStacks.add(stackKey)),
               child: Stack(
                 children: [
-                  
                   Transform.translate(
                     offset: const Offset(4, 4),
                     child: Container(
                       height: 80,
                       decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.1),
+                        color: colorScheme.surfaceContainerHigh,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: color.withValues(alpha: 0.2)),
+                        border: Border.all(
+                          color: colorScheme.outlineVariant.withOpacity(0.5),
+                        ),
                       ),
                     ),
                   ),
@@ -919,13 +905,15 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                     child: Container(
                       height: 80,
                       decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.05),
+                        color: colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: color.withValues(alpha: 0.1)),
+                        border: Border.all(
+                          color: colorScheme.outlineVariant.withOpacity(0.5),
+                        ),
                       ),
                     ),
                   ),
-                  
+
                   _buildMemoryCard(
                     context,
                     colorScheme,
@@ -950,16 +938,13 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   }) {
     final tag = memory['tag'];
     final tagColorName = memory['tagColor'];
-    final cardColor = _getColor(
-      tagColorName,
-    ); 
+    final cardColor = _getColor(tagColorName);
 
-    return Card(
-      elevation: 0,
-      color: cardColor.withValues(alpha: 0.1),
+    return Material(
+      color: colorScheme.surfaceContainer,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: cardColor.withValues(alpha: 0.3)),
+        side: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.5)),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -995,8 +980,8 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                       ),
                       child: Text(
                         '+${count - 1}',
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: colorScheme.onPrimary,
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
                         ),
@@ -1035,7 +1020,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   }
 
   Widget _buildCalendarView(BuildContext context, ColorScheme colorScheme) {
-    
     final years = _groupedMemories.keys.toList()
       ..sort((a, b) => b.compareTo(a));
 
@@ -1085,8 +1069,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                   child: InkWell(
                     onTap: hasMemories
                         ? () {
-                            
-                            
                             setState(() {
                               _isCalendarView = false;
                               _collapsedYears.remove(year);

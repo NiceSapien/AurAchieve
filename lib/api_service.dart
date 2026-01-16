@@ -954,7 +954,11 @@ class ApiService {
     }
   }
 
-  Future<String> uploadMemoryFile(File file, String fileId, {bool isPublic = false}) async {
+  Future<String> uploadMemoryFile(
+    File file,
+    String fileId, {
+    bool isPublic = false,
+  }) async {
     try {
       List<String>? permissions;
       if (isPublic) {
@@ -997,7 +1001,6 @@ class ApiService {
           await deleteFile(fileId);
         } catch (e) {
           print('Failed to delete file $fileId: $e');
-          
         }
       }
     }
@@ -1006,7 +1009,9 @@ class ApiService {
     final response = await _performRequest('DELETE', endpoint);
     if (response.statusCode == 200) return;
     if (response.statusCode == 404) throw Exception('Memory not found');
-    throw Exception('Failed to delete memory: ${response.statusCode} ${response.body}');
+    throw Exception(
+      'Failed to delete memory: ${response.statusCode} ${response.body}',
+    );
   }
 
   Future<List<dynamic>> getMemories({int? length}) async {
@@ -1014,7 +1019,7 @@ class ApiService {
     if (length != null) {
       endpoint += '?length=$length';
     }
-    
+
     final response = await _performRequest('GET', endpoint);
 
     if (response.statusCode == 200) {

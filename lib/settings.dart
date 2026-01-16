@@ -537,19 +537,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          if (AppConfig.baseUrl != AppConfig.defaultBaseUrl)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Center(
-                child: Text(
-                  'Connected to ${AppConfig.baseUrl}',
-                  style: GoogleFonts.gabarito(
-                    fontSize: 12,
-                    color: cs.onSurfaceVariant.withOpacity(0.6),
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );

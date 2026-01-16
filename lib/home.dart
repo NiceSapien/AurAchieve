@@ -1079,14 +1079,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               onPressed: () async {
                 await Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder:
-                        (_) => MemoryLanesPage(
-                          apiService: _apiService,
-                          e2eStatus: _memoryLanesE2E,
-                        ),
+                    builder: (_) => MemoryLanesPage(
+                      apiService: _apiService,
+                      e2eStatus: _memoryLanesE2E,
+                    ),
                   ),
                 );
-                
+
                 _fetchDataFromServer();
               },
             ),

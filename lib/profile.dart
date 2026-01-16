@@ -445,7 +445,10 @@ class _ProfilePageState extends State<ProfilePage> {
                     title: 'Aura Page',
                     color: Colors.purple,
                     trailing: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: scheme.error,
                         borderRadius: BorderRadius.circular(12),
@@ -547,6 +550,17 @@ class _ProfilePageState extends State<ProfilePage> {
                         color: scheme.onSurfaceVariant.withOpacity(0.5),
                       ),
                     ),
+                  if (AppConfig.baseUrl != AppConfig.defaultBaseUrl)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Connected to ${AppConfig.baseUrl}',
+                        style: GoogleFonts.gabarito(
+                          fontSize: 12,
+                          color: scheme.onSurfaceVariant.withOpacity(0.5),
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 32),
                 ],
               ),
@@ -563,44 +577,41 @@ class _ProfilePageState extends State<ProfilePage> {
     Widget? trailing,
   }) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Material(
         color: scheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: scheme.outlineVariant.withOpacity(0.5)),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(16),
-        leading: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(icon, color: color, size: 28),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: scheme.outlineVariant.withOpacity(0.5)),
         ),
-        title: Text(
-          title,
-          style: GoogleFonts.gabarito(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (trailing != null) ...[
-              trailing,
-              const SizedBox(width: 8),
-            ],
-            Icon(
-              Icons.chevron_right_rounded,
-              color: scheme.onSurfaceVariant,
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          contentPadding: const EdgeInsets.all(16),
+          leading: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
             ),
-          ],
+            child: Icon(icon, color: color, size: 28),
+          ),
+          title: Text(
+            title,
+            style: GoogleFonts.gabarito(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (trailing != null) ...[trailing, const SizedBox(width: 8)],
+              Icon(Icons.chevron_right_rounded, color: scheme.onSurfaceVariant),
+            ],
+          ),
+          onTap: onTap,
         ),
-        onTap: onTap,
       ),
     );
   }

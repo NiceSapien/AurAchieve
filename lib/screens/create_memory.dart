@@ -53,9 +53,8 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
     '✨',
   ];
 
-  
   final List<File> _mediaFiles = [];
-  final List<String> _mediaTypes = []; 
+  final List<String> _mediaTypes = [];
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
   int? _playingIndex;
@@ -153,7 +152,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
         return;
       }
 
-      
       final dir = await getTemporaryDirectory();
       final targetPath =
           '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.webp';
@@ -246,7 +244,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
 
     setState(() => _isSaving = true);
     try {
-      
       List<String> fileIds = [];
       for (int i = 0; i < _mediaFiles.length; i++) {
         final file = _mediaFiles[i];
@@ -264,11 +261,9 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
         fileIds.add(id);
       }
 
-      
       final delta = _quillController.document.toDelta();
       String description = jsonEncode(delta.toJson());
 
-      
       String? name = _titleController.text.trim();
       String? tag = _tagController.text.trim().isNotEmpty
           ? _tagController.text.trim()
@@ -601,7 +596,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                       border: InputBorder.none,
                     ),
                   ),
-                  
+
                   InkWell(
                     onTap: () async {
                       final date = await showDatePicker(
@@ -659,7 +654,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                   ),
                   const SizedBox(height: 16),
 
-                  
                   if (_tagController.text.isNotEmpty) ...[
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -705,7 +699,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                     const SizedBox(height: 16),
                   ],
 
-                  
                   if (_mediaFiles.isNotEmpty) ...[
                     SizedBox(
                       height: 120,
@@ -762,7 +755,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                                                           );
                                                         } else {
                                                           await _audioPlayer
-                                                              .stop(); 
+                                                              .stop();
                                                           await _audioPlayer
                                                               .play(
                                                                 DeviceFileSource(
@@ -835,7 +828,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                     const SizedBox(height: 16),
                   ],
 
-                  
                   Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(12),
@@ -861,15 +853,13 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                   ),
 
                   const SizedBox(height: 16),
-                  
-                  
+
                   const SizedBox(height: 32),
                 ],
               ),
             ),
           ),
 
-          
           Center(
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -924,7 +914,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
             ),
           ),
 
-          
           Container(
             decoration: BoxDecoration(
               color: colorScheme.surfaceContainer,
@@ -1237,7 +1226,7 @@ class _RecordingDialogState extends State<RecordingDialog> {
   Future<void> _startRecording() async {
     if (await _audioRecorder.hasPermission()) {
       final dir = await getTemporaryDirectory();
-      
+
       _path = '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.mp3';
 
       await _audioRecorder.start(
