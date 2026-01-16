@@ -434,7 +434,6 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
 
                 if (response.statusCode == 200) {
                   try {
-                    
                     final Map<String, dynamic> data = jsonDecode(response.body);
                     final String? autoEndpoint = data['appwriteEndpoint'];
                     final String? autoProject = data['appwriteProjectId'];
@@ -461,9 +460,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                       }
                       return;
                     }
-                  } catch (_) {
-                    
-                  }
+                  } catch (_) {}
 
                   if (response.body == 'feel alive.') {
                     AppConfig.setBaseUrl(url);

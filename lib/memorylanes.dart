@@ -269,8 +269,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
             setState(() => _isPinLocked = false);
             return true;
           } else {
-             
-             return false;
+            return false;
           }
         },
         onCancel: () => Navigator.pop(context),
@@ -464,7 +463,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   }
 
   Future<void> _showPinSetupDialog() async {
-    
     if (_pin != null) {
       final confirm = await showDialog<bool>(
         context: context,
@@ -504,7 +502,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
       return;
     }
 
-    
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => LockScreen(
@@ -515,10 +512,10 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
             if (mounted) {
               setState(() {
                 _pin = newPin;
-                
+
                 _isPinLocked = false;
               });
-              Navigator.pop(context); 
+              Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('PIN setup successfully')),
               );
