@@ -87,8 +87,6 @@ class _MorphingKeyState extends State<_MorphingKey>
               clipBehavior: Clip.antiAlias,
               child: InkWell(
                 onTap: () {
-                  
-                  
                   widget.onTap();
                 },
                 onHighlightChanged: (value) {
@@ -231,9 +229,7 @@ class _LockScreenState extends State<LockScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _message.isNotEmpty
-                        ? _message
-                        : (widget.subtitle ?? 'Enter your PIN'),
+                    _message.isNotEmpty ? _message : (widget.subtitle ?? ''),
                     style: GoogleFonts.gabarito(
                       fontSize: 16,
                       color: _isError ? scheme.error : scheme.onSurfaceVariant,

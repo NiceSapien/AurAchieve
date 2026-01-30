@@ -12,9 +12,9 @@ Pre-register for release: [Google forms](https://docs.google.com/forms/d/e/1FAIp
 
 ## Self-hosting
 
-If you wish to self-host AurAchieve for some reason, you'll have to clone the [backend](https://github.com/NiceSapien/AurAchieve-backend) repository aswell, written in ExpressJS. The instructions to setup the backend are present in the repository readme.
+If you wish to self-host AurAchieve for some reason, you'll have to clone and deploy the [backend](https://github.com/NiceSapien/AurAchieve-backend) repository, written in ExpressJS. The instructions to setup the backend are present in the repository readme.
 
-To setup the frontend:
+To setup the frontend, you can either build the apk with your server URL preset or you can use the official version and set your own URL. To do so, tap on the main intro screen (before signup/login) 7 times and a prompt to enter your server URL will open. Just enter it and you'll be connected to your own server. Alternatively if you'd like to build the APK yourself, follow these steps:
 
 1. Clone the repository
 2. Install flutter and download packages
@@ -23,19 +23,19 @@ To setup the frontend:
 pub get && flutter pub get
 ```
 
-3. Edit lib/api_service.dart with your own backend URL. Do **not** use our API link!
+3. Edit lib/api_service.dart with your own backend URL.
 
-4. Update lib/main.dart with you own appwrite project. Do **not** use our project ID!
+4. Update lib/main.dart with you own appwrite project. Do **not** use AurAchieve's project ID, or your self hosted version won't work!
 
 5. Build. That's all.
 
 ```bash
-flutter build apk --debug
+flutter build apk --profile
 ```
 
 ## Contributing
 
-There's not much about contributing yet. Make sure to deploy your own backend and not use our API link for testing. After you're done, revert it back to ours and make a pull request. Here's how you may make commits:
+There's not much about contributing yet. Make sure to deploy your own backend and not use AurAchieve's server URL for testing. After you're done, revert it back to ours and make a pull request. Here's how you may make commits:
 
 `feat`: For new features
 
@@ -55,7 +55,7 @@ There's not much about contributing yet. Make sure to deploy your own backend an
 
 - [Renarin Kholin](https://github.com/renarin-kholin), $15
 
-If you appreciate AurAchieve and want to keep it free for everyone, please [sponsor](https://github.com/sponsors/NiceSapien) me. You can also do this through [patreon](https://patreon.com/nicesapien), but GitHub sponsors is preferred over Patreon as it charges less. The codebase is provided under the MIT license absolutely free of charge, forever.
+If you appreciate AurAchieve and want to keep it free for everyone, hit the [sponsor](https://github.com/sponsors/NiceSapien) button. You can also do this through [patreon](https://patreon.com/nicesapien), but GitHub sponsors is preferred over Patreon as it charges less. The codebase is provided under the MIT license absolutely free of charge.
 
 
 

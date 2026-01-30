@@ -42,6 +42,7 @@ dependencies:
   chewie: ^1.13.0
   local_auth: ^3.0.0
   encrypt: ^5.0.3
+  emoji_picker_flutter: ^4.4.0
 
 dev_dependencies:
   flutter_test:

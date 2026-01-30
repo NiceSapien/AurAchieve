@@ -12,6 +12,8 @@ import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart' as emoji_picker;
 import '../api_service.dart';
 
 class CreateMemoryPage extends StatefulWidget {
@@ -42,6 +44,8 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   DateTime _selectedDate = DateTime.now();
   bool _toolbarExpanded = false;
 
+  List<String> _recentMoods = [];
+
   static const List<String> _allowedMoods = [
     '😀',
     '😢',
@@ -49,8 +53,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
     '🥳',
     '😴',
     '🔥',
-    '❤️',
-    '✨',
+    '💔',
   ];
 
   final List<File> _mediaFiles = [];
@@ -72,6 +75,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   @override
   void initState() {
     super.initState();
+    _loadRecentMoods();
     _quillController = quill.QuillController.basic();
     _audioPlayer.onPlayerComplete.listen((_) {
       if (mounted) {
@@ -431,6 +435,52 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
     );
   }
 
+  Future<void> _loadRecentMoods() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _recentMoods =
+          prefs.getStringList('recent_moods') ?? _allowedMoods.take(7).toList();
+    });
+  }
+
+  Future<void> _selectMood(String mood) async {
+    setState(() => _selectedMood = mood);
+
+    final prefs = await SharedPreferences.getInstance();
+    List<String> recents =
+        prefs.getStringList('recent_moods') ?? _allowedMoods.take(7).toList();
+
+    recents.remove(mood);
+    recents.insert(0, mood);
+
+    if (recents.length > 7) {
+      recents = recents.sublist(0, 7);
+    }
+
+    await prefs.setStringList('recent_moods', recents);
+    setState(() => _recentMoods = recents);
+  }
+
+  void _showFullEmojiPicker() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SizedBox(
+        height: MediaQuery.of(context).size.height * 0.5,
+        child: emoji_picker.EmojiPicker(
+          onEmojiSelected: (category, emoji) {
+            Navigator.pop(context);
+            _selectMood(emoji.emoji);
+          },
+          config: const emoji_picker.Config(
+            checkPlatformCompatibility: true,
+            emojiViewConfig: emoji_picker.EmojiViewConfig(columns: 7),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showMoodPicker() {
     showModalBottomSheet(
       context: context,
@@ -453,33 +503,55 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                 spacing: 24,
                 runSpacing: 24,
                 alignment: WrapAlignment.center,
-                children: _allowedMoods.map((mood) {
-                  final isSelected = _selectedMood == mood;
-                  return GestureDetector(
+                children: [
+                  ..._recentMoods.map((mood) {
+                    final isSelected = _selectedMood == mood;
+                    return GestureDetector(
+                      onTap: () {
+                        _selectMood(mood);
+                        Navigator.pop(context);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? Theme.of(context).colorScheme.primaryContainer
+                              : Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHigh,
+                          shape: BoxShape.circle,
+                          border: isSelected
+                              ? Border.all(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  width: 2,
+                                )
+                              : null,
+                        ),
+                        child: Text(mood, style: const TextStyle(fontSize: 32)),
+                      ),
+                    );
+                  }),
+                  GestureDetector(
                     onTap: () {
-                      setState(() => _selectedMood = mood);
                       Navigator.pop(context);
+                      _showFullEmojiPicker();
                     },
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: isSelected
-                            ? Theme.of(context).colorScheme.primaryContainer
-                            : Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerHigh,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHigh,
                         shape: BoxShape.circle,
-                        border: isSelected
-                            ? Border.all(
-                                color: Theme.of(context).colorScheme.primary,
-                                width: 2,
-                              )
-                            : null,
                       ),
-                      child: Text(mood, style: const TextStyle(fontSize: 32)),
+                      child: Icon(
+                        Icons.add_reaction_outlined,
+                        size: 32,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
                     ),
-                  );
-                }).toList(),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
             ],

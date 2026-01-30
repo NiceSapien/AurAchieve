@@ -12,8 +12,7 @@ dynamic _parseJson(String jsonString) {
 }
 
 class AppConfig {
-  static const String defaultBaseUrl =
-      'https://auraascend-fgf4aqf5gubgacb3.centralindia-01.azurewebsites.net';
+  static const String defaultBaseUrl = 'https://api.aurachieve.com';
   static String baseUrl = defaultBaseUrl;
 
   static const String defaultAppwriteEndpoint =
