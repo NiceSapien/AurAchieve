@@ -1,14 +1,44 @@
 # AurAchieve
 
-**Fix your damn life.**
+**Fix your life.**
 
-AurAchieve is the only self-improvement app you'll ever need. Earn Aura for every good thing you do. Prove it with AI, a timer, or just your honesty.
+AurAchieve is the only self-improvement app you need. Master your habits. Boost your aura.
 
-Get it now through [GitHub actions](https://github.com/NiceSapien/AurAchieve/actions).
+Get it now through [GitHub releases](https://github.com/NiceSapien/AurAchieve/releases).
 
-Get into the community for insider news and updates!: [Discord](https://discord.gg/XQ5U7p7bdz)
+Get into the community for insider news and updates: [Discord](https://discord.gg/XQ5U7p7bdz)
 
-Pre-register for release: [Google forms](https://docs.google.com/forms/d/e/1FAIpQLSdA6v4FyNCA9lzf_E-mPBP-PtF9ioedzijNrLCMPM9F_WuFgA/viewform?usp=header)
+Pre-register for release: [Google forms](https://docs.google.com/forms/d/e/1FAIpQLSdA6v4FyNCA9lzf_E-mPBP-PtF9ioedzijNrLCMPM9F_WuFgA/viewform?usp=header) (Google Play Pre-registration opens soon!)
+## About
+### Screenshots
+Click on any image to enlarge it.
+<table>
+	<tr>
+		<td><img src='screenshots/home.png' width='120'></td>
+		<td><img src='screenshots/timer.png' width='120'></td>
+		<td><img src='screenshots/habits.png' width='120'></td>
+		<td><img src='screenshots/aurapage.png' width='120'></td>
+        <td><img src='screenshots/shop.png' width='120'></td>
+	</tr>
+</table>
+
+### Features
+
+- A habit tracker: Build good habits, one step at a time. Let go of your bad habits forever. Sometimes, it seems like nothing is happening when you're trying to form a good habit; a habit tracker allows you to see progress.
+
+- Memory Lanes: One of the best journal/diaries you'll ever find. Supports End-to-End encryption so no one except for you, not even us, can look at your personal diaries. You can also store images, videos, audio recordings and more. Store your memories and you can take a trip down your memory lane anytime.
+
+- Social Media Blocker: One of a kind. Unlike other blockers that block your access from the app, AurAchieve requires you to change the password of your social media accounts - and it doesn't let you login until the timeout you set.
+
+- Study Planner: If you are a student, you can prepare for an upcoming exam easily. Just enter your subjects and chapters, and boom! That's it. The app will create a study plan for you to follow until your set deadline. Don't follow it, lose aura. Follow it, gain aura.
+
+- Focus Timer: Focus on what you're doing properly and get aura. Includes a pomodoro timer to help you take small breaks in between.
+
+- Aura Pages: Get yourself a aura page. Its like a social media page of yourself, except for its built to showcase the best of your achievements, memories, and aura.
+
+- Shop: Buy streak freezes for your habits, themes for your aura page, and so much more. No real money involved - you spend your aura for whatever you buy.
+
+- Tasks: Complete one-time tasks to gain aura.
 
 ## Self-hosting
 

@@ -41,6 +41,16 @@
             android:name="flutterEmbedding"
             android:value="2" />
         <activity
+            android:name="io.appwrite.views.CallbackActivity"
+            android:exported="true">
+            <intent-filter android:label="android_web_auth">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="appwrite-callback-6800a2680008a268a6a3" />
+            </intent-filter>
+        </activity>
+        <activity
             android:name="com.yalantis.ucrop.UCropActivity"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>

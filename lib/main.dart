@@ -4,6 +4,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:appwrite/appwrite.dart' as appwrite;
 import 'package:appwrite/models.dart' as models;
+import 'package:appwrite/enums.dart' as enums;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -628,6 +629,29 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
     }
   }
 
+  Future<void> _signInWithGoogle() async {
+    if (!mounted) return;
+    setState(() => isBusy = true);
+    try {
+      await widget.account.createOAuth2Session(
+        provider: enums.OAuthProvider.google,
+      );
+      final jwt = await widget.account.createJWT();
+      await _storage.write(key: 'jwt_token', value: jwt.jwt);
+      await _handleSuccessfulAuth();
+    } catch (e) {
+      if (!e.toString().contains('canceled') &&
+          !e.toString().contains('Canceled')) {
+        showError(
+          'Google Sign-In failed: ${e.toString().replaceAll('AppwriteException: ', '')}',
+        );
+      }
+    }
+    if (mounted) {
+      setState(() => isBusy = false);
+    }
+  }
+
   void _showVerificationSentDialog() {
     showDialog(
       context: context,
@@ -1093,162 +1117,231 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final showForm = showSignup || showLogin;
-            final formWidget = showSignup
-                ? _signupForm()
-                : showLogin
-                ? _loginForm()
-                : null;
+    return PopScope(
+      canPop: !showSignup && !showLogin,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        setState(() {
+          showLogin = false;
+          showSignup = false;
+          stopCarousel = false;
+          Future.microtask(_autoPlayFeatures);
+        });
+      },
+      child: Scaffold(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        resizeToAvoidBottomInset: true,
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final showForm = showSignup || showLogin;
+              final formWidget = showSignup
+                  ? _signupForm()
+                  : showLogin
+                  ? _loginForm()
+                  : null;
 
-            Widget currentScreen;
-            if (!showForm) {
-              currentScreen = GestureDetector(
-                onTap: () {
-                  setState(() => _tapCount++);
-                  if (_tapCount >= 7) {
-                    _tapCount = 0;
-                    _showApiEndpointDialog();
-                  }
-                },
-                behavior: HitTestBehavior.opaque,
-                child: Column(
-                  key: const ValueKey('carousel'),
+              Widget currentScreen;
+              if (!showForm) {
+                currentScreen = GestureDetector(
+                  onTap: () {
+                    setState(() => _tapCount++);
+                    if (_tapCount >= 7) {
+                      _tapCount = 0;
+                      _showApiEndpointDialog();
+                    }
+                  },
+                  behavior: HitTestBehavior.opaque,
+                  child: Column(
+                    key: const ValueKey('carousel'),
+                    children: [
+                      Expanded(child: _featuresCarousel()),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 16,
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            FilledButton.icon(
+                              icon: Icon(Icons.rocket_launch_rounded),
+                              onPressed: () => setState(() {
+                                showSignup = true;
+                                stopCarousel = true;
+                              }),
+                              label: Text(
+                                'Get Started',
+                                style: GoogleFonts.gabarito(fontSize: 18),
+                              ),
+                              style: FilledButton.styleFrom(
+                                minimumSize: Size(double.infinity, 48),
+                              ),
+                            ),
+                            SizedBox(height: 16),
+                            OutlinedButton.icon(
+                              icon: Icon(Icons.login_rounded),
+                              onPressed: () => setState(() {
+                                showLogin = true;
+                                stopCarousel = true;
+                              }),
+                              label: Text(
+                                'Login',
+                                style: GoogleFonts.gabarito(fontSize: 18),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: Size(double.infinity, 48),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              } else {
+                currentScreen = Column(
                   children: [
-                    Expanded(child: _featuresCarousel()),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        key: const ValueKey('form'),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(height: 24),
+                            _authHeader(isSignup: showSignup),
+                            SizedBox(height: 24),
+                            formWidget ?? SizedBox.shrink(),
+                            const SizedBox(height: 16),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24.0,
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(child: Divider()),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    child: Text(
+                                      'OR',
+                                      style: GoogleFonts.gabarito(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.outline,
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(child: Divider()),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24.0,
+                              ),
+                              child: OutlinedButton(
+                                onPressed: isBusy ? null : _signInWithGoogle,
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size(double.infinity, 56),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SvgPicture.asset(
+                                      'assets/img/google.svg',
+                                      height: 24,
+                                      width: 24,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      'Google',
+                                      style: GoogleFonts.gabarito(fontSize: 18),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                     Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 16,
+                      padding: EdgeInsets.only(
+                        left: 24,
+                        right: 24,
+                        bottom: MediaQuery.of(context).padding.bottom > 0
+                            ? MediaQuery.of(context).padding.bottom
+                            : 16,
+                        top: 8,
                       ),
                       child: Column(
-                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          FilledButton.icon(
-                            icon: Icon(Icons.rocket_launch_rounded),
-                            onPressed: () => setState(() {
-                              showSignup = true;
-                              stopCarousel = true;
-                            }),
-                            label: Text(
-                              'Get Started',
-                              style: GoogleFonts.gabarito(fontSize: 18),
-                            ),
-                            style: FilledButton.styleFrom(
-                              minimumSize: Size(double.infinity, 48),
-                            ),
-                          ),
-                          SizedBox(height: 16),
-                          OutlinedButton.icon(
-                            icon: Icon(Icons.login_rounded),
-                            onPressed: () => setState(() {
-                              showLogin = true;
-                              stopCarousel = true;
-                            }),
-                            label: Text(
-                              'Login',
-                              style: GoogleFonts.gabarito(fontSize: 18),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: Size(double.infinity, 48),
-                            ),
+                          _buildLegalText(),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              TextButton(
+                                onPressed: () {
+                                  setState(() {
+                                    showLogin = false;
+                                    showSignup = false;
+                                    stopCarousel = false;
+                                    Future.microtask(_autoPlayFeatures);
+                                  });
+                                },
+                                child: Text(
+                                  'Back',
+                                  style: GoogleFonts.gabarito(),
+                                ),
+                              ),
+                              FilledButton.icon(
+                                icon: Icon(
+                                  showSignup
+                                      ? Icons.person_add_alt_1_rounded
+                                      : Icons.login_rounded,
+                                ),
+                                onPressed: isBusy
+                                    ? null
+                                    : (showSignup ? register : login),
+                                label: isBusy
+                                    ? SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : Text(
+                                        showSignup ? 'Sign Up' : 'Login',
+                                        style: GoogleFonts.gabarito(
+                                          fontSize: 18,
+                                        ),
+                                      ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
                     ),
                   ],
-                ),
-              );
-            } else {
-              currentScreen = Column(
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      key: const ValueKey('form'),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(height: 24),
-                          _authHeader(isSignup: showSignup),
-                          SizedBox(height: 24),
-                          formWidget ?? SizedBox.shrink(),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: EdgeInsets.only(
-                      left: 24,
-                      right: 24,
-                      bottom: MediaQuery.of(context).padding.bottom > 0
-                          ? MediaQuery.of(context).padding.bottom
-                          : 16,
-                      top: 8,
-                    ),
-                    child: Column(
-                      children: [
-                        _buildLegalText(),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            TextButton(
-                              onPressed: () {
-                                setState(() {
-                                  showLogin = false;
-                                  showSignup = false;
-                                  stopCarousel = false;
-                                  Future.microtask(_autoPlayFeatures);
-                                });
-                              },
-                              child: Text(
-                                'Back',
-                                style: GoogleFonts.gabarito(),
-                              ),
-                            ),
-                            FilledButton.icon(
-                              icon: Icon(
-                                showSignup
-                                    ? Icons.person_add_alt_1_rounded
-                                    : Icons.login_rounded,
-                              ),
-                              onPressed: isBusy
-                                  ? null
-                                  : (showSignup ? register : login),
-                              label: isBusy
-                                  ? SizedBox(
-                                      height: 20,
-                                      width: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : Text(
-                                      showSignup ? 'Sign Up' : 'Login',
-                                      style: GoogleFonts.gabarito(fontSize: 18),
-                                    ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            }
+                );
+              }
 
-            return AnimatedSwitcher(
-              duration: const Duration(milliseconds: 500),
-              transitionBuilder: (Widget child, Animation<double> animation) {
-                return FadeTransition(opacity: animation, child: child);
-              },
-              child: currentScreen,
-            );
-          },
+              return AnimatedSwitcher(
+                duration: const Duration(milliseconds: 500),
+                transitionBuilder: (Widget child, Animation<double> animation) {
+                  return FadeTransition(opacity: animation, child: child);
+                },
+                child: currentScreen,
+              );
+            },
+          ),
         ),
       ),
     );
