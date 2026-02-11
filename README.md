@@ -4,6 +4,11 @@
 
 AurAchieve is the only self-improvement app you need. Master your habits. Boost your aura.
 
+## Demo video
+https://quickshare.samsungcloud.com/s3UEEmAPTWYR
+
+## Links
+
 Get it now through [GitHub releases](https://github.com/NiceSapien/AurAchieve/releases).
 
 Get into the community for insider news and updates: [Discord](https://discord.gg/XQ5U7p7bdz)
