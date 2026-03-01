@@ -3,8 +3,8 @@
 **Fix your life.**
 
 AurAchieve is the only self-improvement app you need. Master your habits. Boost your aura.
-
-
+[Screenshots](#screenshots) <br>
+[Demo video](https://youtube.com/shorts/6ZlfTz8Uq4M?si=AXeQnWxzrNsYBicQ)
 ## Links
 
 Get it now through [GitHub releases](https://github.com/NiceSapien/AurAchieve/releases).
@@ -15,7 +15,7 @@ Pre-register for release: [Google forms](https://docs.google.com/forms/d/e/1FAIp
 ## About
 ### Screenshots
 Click on any image to enlarge it.
-<table>
+<table id="screenshots">
 	<tr>
 		<td><img src='screenshots/home.png' width='120'></td>
 		<td><img src='screenshots/timer.png' width='120'></td>
