@@ -13,7 +13,7 @@ dependencies:
   flutter_svg: ^2.0.10
   google_fonts: ^6.2.1
   image_picker: ^1.1.2
-  shared_preferences: ^2.2.2
+  shared_preferences: ^2.5.4
   dynamic_color: ^1.6.6
   http: ^1.4.0
   flutter_secure_storage: ^9.2.4

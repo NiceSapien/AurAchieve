@@ -7,6 +7,7 @@ import 'api_service.dart';
 import 'screens/create_memory.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'screens/view_memory.dart';
+import 'utils/draft_utils.dart'; 
 import 'lock.dart';
 
 class MemoryLanesPage extends StatefulWidget {
@@ -156,6 +157,26 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     try {
       final memories = await widget.apiService.getMemories();
 
+      
+      final drafts = await DraftManager.getDrafts();
+      final draftMemories = drafts
+          .map(
+            (d) => {
+              'id': d.id,
+              'name': d.title,
+              'description': d.description,
+              'tag': d.tag,
+              'tagColor': d.tagColor,
+              'mood': d.mood,
+              'createdAt': DateTime.fromMillisecondsSinceEpoch(
+                d.timestamp,
+              ).toIso8601String(),
+              'isDraft': true,
+              'draftObject': d, 
+            },
+          )
+          .toList();
+
       if (_localE2eStatus == 'true' &&
           _unlockPasswordController.text.isNotEmpty) {
         final key = encrypt.Key.fromUtf8(
@@ -180,8 +201,9 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
 
         for (var memory in memories) {
           if (memory['public'] == true) continue;
-          if (memory['description'] != null)
+          if (memory['description'] != null) {
             memory['description'] = decryptField(memory['description']);
+          }
           if (memory['name'] != null)
             memory['name'] = decryptField(memory['name']);
           if (memory['tag'] != null)
@@ -195,7 +217,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
 
       if (mounted) {
         setState(() {
-          _memories = memories;
+          _memories = [...draftMemories, ...memories];
           _groupMemoriesList();
         });
       }
@@ -328,139 +350,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     );
   }
 
-  Widget _buildPinLockScreen(BuildContext context, ColorScheme colorScheme) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Memory Lanes Locked')),
-      body: SafeArea(
-        child: Column(
-          children: [
-            const Spacer(),
-            Icon(
-              Icons.lock_outline_rounded,
-              size: 48,
-              color: colorScheme.primary,
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Enter PIN',
-              style: GoogleFonts.gabarito(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(4, (index) {
-                final filled = _pinController.text.length > index;
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  margin: const EdgeInsets.symmetric(horizontal: 12),
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: filled
-                        ? colorScheme.primary
-                        : colorScheme.surfaceContainerHighest,
-                    border: Border.all(
-                      color: filled ? colorScheme.primary : colorScheme.outline,
-                      width: 2,
-                    ),
-                  ),
-                );
-              }),
-            ),
-            const Spacer(),
-            Container(
-              constraints: const BoxConstraints(maxWidth: 360),
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  childAspectRatio: 1.2,
-                  crossAxisSpacing: 24,
-                  mainAxisSpacing: 24,
-                ),
-                itemCount: 12,
-                itemBuilder: (context, index) {
-                  if (index == 9) return const SizedBox();
-                  if (index == 11) {
-                    return InkWell(
-                      onTap: () {
-                        if (_pinController.text.isNotEmpty) {
-                          setState(() {
-                            _pinController.text = _pinController.text.substring(
-                              0,
-                              _pinController.text.length - 1,
-                            );
-                          });
-                        }
-                      },
-                      borderRadius: BorderRadius.circular(40),
-                      child: Center(
-                        child: Icon(
-                          Icons.backspace_outlined,
-                          color: colorScheme.onSurface,
-                          size: 28,
-                        ),
-                      ),
-                    );
-                  }
-
-                  final number = index == 10 ? 0 : index + 1;
-                  return FilledButton.tonal(
-                    onPressed: () {
-                      if (_pinController.text.length < 4) {
-                        setState(() {
-                          _pinController.text += number.toString();
-                        });
-
-                        if (_pinController.text.length == 4) {
-                          if (_pinController.text == _pin) {
-                            Future.delayed(
-                              const Duration(milliseconds: 200),
-                              () {
-                                setState(() {
-                                  _isPinLocked = false;
-                                  _pinController.clear();
-                                });
-                              },
-                            );
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Incorrect PIN')),
-                            );
-                            _pinController.clear();
-                          }
-                        }
-                      }
-                    },
-                    style: FilledButton.styleFrom(
-                      shape: const CircleBorder(),
-                      padding: const EdgeInsets.all(20),
-                      backgroundColor: colorScheme.surfaceContainerHigh,
-                    ),
-                    child: Text(
-                      number.toString(),
-                      style: GoogleFonts.gabarito(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        color: colorScheme.onSurface,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 48),
-          ],
-        ),
-      ),
-    );
-  }
+  
 
   Future<void> _showPinSetupDialog() async {
     if (_pin != null) {
@@ -931,26 +821,74 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     dynamic memory,
     Color color, {
     bool isStackTop = false,
-    int count = 0,
+    int count = 1,
   }) {
+    final isDraft = memory['isDraft'] == true;
     final tag = memory['tag'];
-    final tagColorName = memory['tagColor'];
-    final cardColor = _getColor(tagColorName);
+    final cardColor = _getColor(memory['tagColor']);
 
     return Material(
       color: colorScheme.surfaceContainer,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.5)),
+        side: BorderSide(
+          color: isDraft
+              ? colorScheme.primary.withOpacity(0.5)
+              : colorScheme.outlineVariant.withOpacity(0.5),
+          width: isDraft ? 2 : 1,
+        ),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: isStackTop ? null : () => _openMemory(memory),
+        onTap: isStackTop
+            ? null
+            : () async {
+                if (isDraft) {
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => CreateMemoryPage(
+                        apiService: widget.apiService,
+                        e2eEnabled: _localE2eStatus == 'true',
+                        draft: memory['draftObject'],
+                      ),
+                    ),
+                  );
+                  
+                  if (result == true || result == null) {
+                    _loadMemories();
+                  }
+                } else {
+                  _openMemory(memory);
+                }
+              },
         child: Padding(
           padding: const EdgeInsets.all(12.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (isDraft)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      'Draft',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ),
+                ),
               Row(
                 children: [
                   Expanded(

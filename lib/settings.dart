@@ -37,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _immersiveMode = true;
   bool _soundVibration = true;
+  bool _saveDrafts = true;
 
   bool _dynamicColor = true;
   String _themeMode = 'auto';
@@ -49,7 +50,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _tabs = {...widget.enabledTabs};
     _safeLoadJwt();
     _safeLoadTimerSettings();
+    _safeLoadDraftSettings();
     _safeLoadThemeSettings();
+  }
+
+  Future<void> _safeLoadDraftSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (mounted) {
+        setState(() {
+          _saveDrafts = prefs.getBool('save_drafts') ?? true;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _safeLoadThemeSettings() async {
@@ -119,6 +132,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       if (key == 'timer_immersive') _immersiveMode = value;
       if (key == 'timer_sound_vibration') _soundVibration = value;
+    });
+  }
+
+  Future<void> _toggleDraftSetting(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('save_drafts', value);
+    setState(() {
+      _saveDrafts = value;
     });
   }
 
@@ -290,6 +311,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+
+          const SizedBox(height: 20),
+          Text(
+            'Memories',
+            style: GoogleFonts.gabarito(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: cs.onSurfaceVariant,
+              letterSpacing: 0.2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            color: cs.surfaceContainerHigh,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: cs.outlineVariant.withOpacity(0.5)),
+            ),
+            child: Column(
+              children: [
+                SwitchListTile.adaptive(
+                  contentPadding: tilePadding,
+                  title: const Text('Save Drafts'),
+                  subtitle: const Text('Keep unsaved memories for 14 days'),
+                  value: _saveDrafts,
+                  onChanged: (v) => _toggleDraftSetting(v),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
 
           const SizedBox(height: 20),
           Text(

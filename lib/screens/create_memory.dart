@@ -14,16 +14,20 @@ import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart' as emoji_picker;
+import 'package:uuid/uuid.dart';
 import '../api_service.dart';
+import '../utils/draft_utils.dart';
 
 class CreateMemoryPage extends StatefulWidget {
   final ApiService apiService;
   final bool e2eEnabled;
+  final DraftMemory? draft;
 
   const CreateMemoryPage({
     super.key,
     required this.apiService,
     this.e2eEnabled = false,
+    this.draft,
   });
 
   @override
@@ -33,7 +37,7 @@ class CreateMemoryPage extends StatefulWidget {
 class _CreateMemoryPageState extends State<CreateMemoryPage> {
   final _titleController = TextEditingController();
   final _tagController = TextEditingController();
-  late final quill.QuillController _quillController;
+  late quill.QuillController _quillController;
   final FocusNode _editorFocusNode = FocusNode();
   final ScrollController _editorScrollController = ScrollController();
 
@@ -43,6 +47,12 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   String? _selectedMood;
   DateTime _selectedDate = DateTime.now();
   bool _toolbarExpanded = false;
+  bool _hasUnsavedChanges = false;
+  Timer? _autoSaveTimer;
+  String? _currentDraftId;
+
+  
+  
 
   List<String> _recentMoods = [];
 
@@ -82,10 +92,119 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
         setState(() => _playingIndex = null);
       }
     });
+
+    
+    if (widget.draft != null) {
+      _currentDraftId = widget.draft!.id;
+      _restoreDraft(widget.draft!);
+    } else {
+      
+      _currentDraftId = const Uuid().v4();
+    }
+
+    
+    _titleController.addListener(_onContentChanged);
+    _tagController.addListener(_onContentChanged);
+    _quillController.document.changes.listen((event) {
+      _onContentChanged();
+    });
+  }
+
+  void _onContentChanged() {
+    if (!_hasUnsavedChanges) {
+      _hasUnsavedChanges = true;
+    }
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(const Duration(seconds: 2), _saveDraft);
+  }
+
+  
+
+  void _restoreDraft(DraftMemory draft) {
+    setState(() {
+      _titleController.text = draft.title;
+      _tagController.text = draft.tag ?? '';
+      _selectedColor = draft.tagColor ?? 'blue';
+      _selectedMood = draft.mood;
+      if (draft.description.isNotEmpty) {
+        try {
+          final delta = jsonDecode(draft.description);
+          final doc = quill.Document.fromJson(delta);
+
+          
+          final oldController = _quillController;
+          _quillController = quill.QuillController(
+            document: doc,
+            selection: const TextSelection.collapsed(offset: 0),
+          );
+          oldController.dispose();
+        } catch (_) {}
+      }
+
+      
+      _mediaFiles.clear();
+      _mediaTypes.clear();
+      for (int i = 0; i < draft.mediaPaths.length; i++) {
+        final path = draft.mediaPaths[i];
+        final type = i < draft.mediaTypes.length
+            ? draft.mediaTypes[i]
+            : 'image';
+
+        final file = File(path);
+        if (file.existsSync()) {
+          _mediaFiles.add(file);
+          _mediaTypes.add(type);
+        }
+      }
+    });
+  }
+
+  Future<void> _saveDraft() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saveDrafts = prefs.getBool('save_drafts') ?? true;
+    if (!saveDrafts) return;
+
+    
+    if (_titleController.text.isEmpty &&
+        _tagController.text.isEmpty &&
+        _quillController.document.isEmpty() &&
+        _mediaFiles.isEmpty) {
+      return;
+    }
+
+    
+    if (_currentDraftId == null) {
+      _currentDraftId = const Uuid().v4();
+    }
+
+    final draft = DraftMemory(
+      id: _currentDraftId!,
+      title: _titleController.text,
+      tag: _tagController.text,
+      tagColor: _selectedColor,
+      mood: _selectedMood,
+      description: jsonEncode(_quillController.document.toDelta().toJson()),
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+      mediaPaths: _mediaFiles.map((f) => f.path).toList(),
+      mediaTypes: _mediaTypes,
+    );
+
+    await DraftManager.saveDraft(draft);
+  }
+
+  Future<void> _deleteCurrentDraft() async {
+    if (_currentDraftId != null) {
+      await DraftManager.deleteDraft(_currentDraftId!);
+    }
+    if (mounted) {
+      Navigator.pop(context); 
+    }
   }
 
   @override
   void dispose() {
+    _autoSaveTimer?.cancel();
+    _saveDraft(); 
     _titleController.dispose();
     _tagController.dispose();
     _quillController.dispose();
@@ -565,672 +684,768 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          'Memory',
-          style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: 'Add Media/Tag',
-            onPressed: _showAddMenu,
-          ),
-          IconButton(
-            icon: Icon(
-              _isPublic ? Icons.public : Icons.public_off,
-              color: _isPublic ? colorScheme.primary : null,
-            ),
-            tooltip: 'Toggle Public',
-            onPressed: () async {
-              if (!_isPublic) {
-                final confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: Text(
-                      'Make Public?',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                    content: Text(
-                      'This memory will be visible to everyone if you have an Aura Page. Are you sure?',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text('Make Public'),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirm == true) {
-                  setState(() => _isPublic = true);
-                }
-              } else {
-                setState(() => _isPublic = false);
-              }
-            },
-          ),
-          const SizedBox(width: 8),
-          FilledButton(
-            onPressed: _isSaving ? null : _save,
-            style: FilledButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop && _hasUnsavedChanges) {
+          await _saveDraft();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Memory saved as draft'),
+                duration: Duration(seconds: 2),
               ),
-            ),
-            child: _isSaving
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : Text(
-                    'Save',
-                    style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
-                  ),
+            );
+          }
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(
+            'Memory',
+            style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
           ),
-          const SizedBox(width: 16),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: _titleController,
-                    style: GoogleFonts.gabarito(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: colorScheme.onSurface,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Add title',
-                      hintStyle: TextStyle(
-                        color: colorScheme.onSurface.withValues(alpha: 0.5),
-                      ),
-                      border: InputBorder.none,
-                    ),
-                  ),
-
-                  InkWell(
-                    onTap: () async {
-                      final date = await showDatePicker(
-                        context: context,
-                        initialDate: _selectedDate,
-                        firstDate: DateTime(1900),
-                        lastDate: DateTime(2100),
-                      );
-
-                      if (date == null) return;
-                      if (!context.mounted) return;
-
-                      final time = await showTimePicker(
-                        context: context,
-                        initialTime: TimeOfDay.fromDateTime(_selectedDate),
-                      );
-
-                      if (time != null && mounted) {
-                        setState(() {
-                          _selectedDate = DateTime(
-                            date.year,
-                            date.month,
-                            date.day,
-                            time.hour,
-                            time.minute,
-                          );
-                        });
-                      }
-                    },
-                    borderRadius: BorderRadius.circular(4),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.calendar_today,
-                            size: 16,
-                            color: colorScheme.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            DateFormat(
-                              'MMM d, yyyy h:mm a',
-                            ).format(_selectedDate),
-                            style: GoogleFonts.gabarito(
-                              color: colorScheme.primary,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
+          bottom: widget.draft != null
+              ? PreferredSize(
+                  preferredSize: const Size.fromHeight(24.0),
+                  child: Container(
+                    color: colorScheme.secondaryContainer,
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Center(
+                      child: Text(
+                        'Editing Draft',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: colorScheme.onSecondaryContainer,
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
-
-                  if (_tagController.text.isNotEmpty) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
+                )
+              : null,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.add),
+              tooltip: 'Add Media/Tag',
+              onPressed: _showAddMenu,
+            ),
+            IconButton(
+              icon: Icon(
+                _isPublic ? Icons.public : Icons.public_off,
+                color: _isPublic ? colorScheme.primary : null,
+              ),
+              tooltip: 'Toggle Public',
+              onPressed: () async {
+                if (!_isPublic) {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text(
+                        'Make Public?',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
                       ),
-                      decoration: BoxDecoration(
-                        color:
-                            _colors.firstWhere(
-                                  (c) => c['name'] == _selectedColor,
-                                  orElse: () => _colors[0],
-                                )['color']
-                                as Color,
-                        borderRadius: BorderRadius.circular(20),
+                      content: Text(
+                        'This memory will be visible to everyone if you have an Aura Page. Are you sure?',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _tagController.text,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Make Public'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm == true) {
+                    setState(() => _isPublic = true);
+                  }
+                } else {
+                  setState(() => _isPublic = false);
+                }
+              },
+            ),
+            if (widget.draft != null)
+              IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: 'Delete Draft',
+                onPressed: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text(
+                        'Delete Draft?',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      content: Text(
+                        'This action cannot be undone.',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          child: const Text('Cancel'),
+                          onPressed: () => Navigator.pop(context, false),
+                        ),
+                        TextButton(
+                          child: const Text(
+                            'Delete',
+                            style: TextStyle(color: Colors.red),
                           ),
-                          const SizedBox(width: 4),
-                          GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _tagController.clear();
-                                _selectedColor = 'blue';
-                              });
-                            },
-                            child: const Icon(
-                              Icons.close,
+                          onPressed: () => Navigator.pop(context, true),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm == true) {
+                    await _deleteCurrentDraft();
+                  }
+                },
+              ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: _isSaving ? null : _save,
+              style: FilledButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              child: _isSaving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Text(
+                      'Save',
+                      style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
+                    ),
+            ),
+            const SizedBox(width: 16),
+          ],
+        ),
+        body: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: _titleController,
+                      style: GoogleFonts.gabarito(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onSurface,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Add title',
+                        hintStyle: TextStyle(
+                          color: colorScheme.onSurface.withValues(alpha: 0.5),
+                        ),
+                        border: InputBorder.none,
+                      ),
+                    ),
+
+                    InkWell(
+                      onTap: () async {
+                        final date = await showDatePicker(
+                          context: context,
+                          initialDate: _selectedDate,
+                          firstDate: DateTime(1900),
+                          lastDate: DateTime(2100),
+                        );
+
+                        if (date == null) return;
+                        if (!context.mounted) return;
+
+                        final time = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay.fromDateTime(_selectedDate),
+                        );
+
+                        if (time != null && mounted) {
+                          setState(() {
+                            _selectedDate = DateTime(
+                              date.year,
+                              date.month,
+                              date.day,
+                              time.hour,
+                              time.minute,
+                            );
+                          });
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.calendar_today,
                               size: 16,
-                              color: Colors.white,
+                              color: colorScheme.primary,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 8),
+                            Text(
+                              DateFormat(
+                                'MMM d, yyyy h:mm a',
+                              ).format(_selectedDate),
+                              style: GoogleFonts.gabarito(
+                                color: colorScheme.primary,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
-                  ],
 
-                  if (_mediaFiles.isNotEmpty) ...[
-                    SizedBox(
-                      height: 120,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: _mediaFiles.length,
-                        itemBuilder: (context, index) {
-                          final file = _mediaFiles[index];
-                          final type = _mediaTypes[index];
-                          return Stack(
-                            children: [
-                              Container(
-                                width: 100,
-                                margin: const EdgeInsets.only(right: 12),
-                                child: Column(
-                                  children: [
-                                    Container(
-                                      height: 80,
-                                      width: 100,
-                                      decoration: BoxDecoration(
-                                        color: colorScheme.surfaceContainerHigh,
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(
-                                          color: colorScheme.outlineVariant,
+                    if (_tagController.text.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              _colors.firstWhere(
+                                    (c) => c['name'] == _selectedColor,
+                                    orElse: () => _colors[0],
+                                  )['color']
+                                  as Color,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _tagController.text,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _tagController.clear();
+                                  _selectedColor = 'blue';
+                                });
+                              },
+                              child: const Icon(
+                                Icons.close,
+                                size: 16,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    if (_mediaFiles.isNotEmpty) ...[
+                      SizedBox(
+                        height: 120,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _mediaFiles.length,
+                          itemBuilder: (context, index) {
+                            final file = _mediaFiles[index];
+                            final type = _mediaTypes[index];
+                            return Stack(
+                              children: [
+                                Container(
+                                  width: 100,
+                                  margin: const EdgeInsets.only(right: 12),
+                                  child: Column(
+                                    children: [
+                                      Container(
+                                        height: 80,
+                                        width: 100,
+                                        decoration: BoxDecoration(
+                                          color:
+                                              colorScheme.surfaceContainerHigh,
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          border: Border.all(
+                                            color: colorScheme.outlineVariant,
+                                          ),
+                                          image: type == 'image'
+                                              ? DecorationImage(
+                                                  image: FileImage(file),
+                                                  fit: BoxFit.cover,
+                                                )
+                                              : null,
                                         ),
-                                        image: type == 'image'
-                                            ? DecorationImage(
-                                                image: FileImage(file),
-                                                fit: BoxFit.cover,
-                                              )
-                                            : null,
-                                      ),
-                                      child: type != 'image'
-                                          ? Center(
-                                              child: type == 'audio'
-                                                  ? IconButton(
-                                                      icon: Icon(
-                                                        _playingIndex == index
-                                                            ? Icons.stop
-                                                            : Icons.play_arrow,
+                                        child: type != 'image'
+                                            ? Center(
+                                                child: type == 'audio'
+                                                    ? IconButton(
+                                                        icon: Icon(
+                                                          _playingIndex == index
+                                                              ? Icons.stop
+                                                              : Icons
+                                                                    .play_arrow,
+                                                          color: colorScheme
+                                                              .onSurface,
+                                                          size: 32,
+                                                        ),
+                                                        onPressed: () async {
+                                                          if (_playingIndex ==
+                                                              index) {
+                                                            await _audioPlayer
+                                                                .stop();
+                                                            setState(
+                                                              () =>
+                                                                  _playingIndex =
+                                                                      null,
+                                                            );
+                                                          } else {
+                                                            await _audioPlayer
+                                                                .stop();
+                                                            await _audioPlayer
+                                                                .play(
+                                                                  DeviceFileSource(
+                                                                    file.path,
+                                                                  ),
+                                                                );
+                                                            setState(
+                                                              () =>
+                                                                  _playingIndex =
+                                                                      index,
+                                                            );
+                                                          }
+                                                        },
+                                                      )
+                                                    : Icon(
+                                                        Icons.videocam,
                                                         color: colorScheme
                                                             .onSurface,
                                                         size: 32,
                                                       ),
-                                                      onPressed: () async {
-                                                        if (_playingIndex ==
-                                                            index) {
-                                                          await _audioPlayer
-                                                              .stop();
-                                                          setState(
-                                                            () =>
-                                                                _playingIndex =
-                                                                    null,
-                                                          );
-                                                        } else {
-                                                          await _audioPlayer
-                                                              .stop();
-                                                          await _audioPlayer
-                                                              .play(
-                                                                DeviceFileSource(
-                                                                  file.path,
-                                                                ),
-                                                              );
-                                                          setState(
-                                                            () =>
-                                                                _playingIndex =
-                                                                    index,
-                                                          );
-                                                        }
-                                                      },
-                                                    )
-                                                  : Icon(
-                                                      Icons.videocam,
-                                                      color:
-                                                          colorScheme.onSurface,
-                                                      size: 32,
-                                                    ),
-                                            )
-                                          : null,
-                                    ),
-                                    if (type == 'audio')
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: Text(
-                                          'Voice note',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: colorScheme.onSurfaceVariant,
+                                              )
+                                            : null,
+                                      ),
+                                      if (type == 'audio')
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 4,
+                                          ),
+                                          child: Text(
+                                            'Voice note',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color:
+                                                  colorScheme.onSurfaceVariant,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              Positioned(
-                                top: -4,
-                                right: 4,
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      _mediaFiles.removeAt(index);
-                                      _mediaTypes.removeAt(index);
-                                    });
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(4),
-                                    decoration: BoxDecoration(
-                                      color: colorScheme.surface,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: colorScheme.outlineVariant,
+                                Positioned(
+                                  top: -4,
+                                  right: 4,
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        _mediaFiles.removeAt(index);
+                                        _mediaTypes.removeAt(index);
+                                      });
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: colorScheme.surface,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: colorScheme.outlineVariant,
+                                        ),
                                       ),
-                                    ),
-                                    child: Icon(
-                                      Icons.close,
-                                      size: 14,
-                                      color: colorScheme.onSurface,
+                                      child: Icon(
+                                        Icons.close,
+                                        size: 14,
+                                        color: colorScheme.onSurface,
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          );
-                        },
+                              ],
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
+                      const SizedBox(height: 16),
+                    ],
 
-                  Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    constraints: const BoxConstraints(minHeight: 300),
-                    child: DefaultTextStyle(
-                      style: GoogleFonts.gabarito(
-                        color: colorScheme.onSurface,
-                        fontSize: 16,
+                    Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      child: quill.QuillEditor.basic(
-                        controller: _quillController,
-                        focusNode: _editorFocusNode,
-                        scrollController: _editorScrollController,
-                        config: quill.QuillEditorConfig(
-                          placeholder: 'What\'s on your mind?',
-                          padding: const EdgeInsets.all(0),
-                          autoFocus: false,
-                          expands: false,
+                      constraints: const BoxConstraints(minHeight: 300),
+                      child: DefaultTextStyle(
+                        style: GoogleFonts.gabarito(
+                          color: colorScheme.onSurface,
+                          fontSize: 16,
+                        ),
+                        child: quill.QuillEditor.basic(
+                          controller: _quillController,
+                          focusNode: _editorFocusNode,
+                          scrollController: _editorScrollController,
+                          config: quill.QuillEditorConfig(
+                            placeholder: 'What\'s on your mind?',
+                            padding: const EdgeInsets.all(0),
+                            autoFocus: false,
+                            expands: false,
+                          ),
                         ),
                       ),
                     ),
-                  ),
 
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-                  const SizedBox(height: 32),
-                ],
+                    const SizedBox(height: 32),
+                  ],
+                ),
               ),
             ),
-          ),
 
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: GestureDetector(
-                onTap: _showMoodPicker,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: colorScheme.outlineVariant),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.add_reaction_outlined,
-                        color: _selectedMood != null
-                            ? colorScheme.primary
-                            : colorScheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _selectedMood != null
-                            ? 'Mood: $_selectedMood'
-                            : 'Add Mood',
-                        style: GoogleFonts.gabarito(
-                          fontWeight: FontWeight.w600,
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: GestureDetector(
+                  onTap: _showMoodPicker,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: colorScheme.outlineVariant),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.add_reaction_outlined,
                           color: _selectedMood != null
                               ? colorScheme.primary
                               : colorScheme.onSurfaceVariant,
                         ),
-                      ),
-                      if (_selectedMood != null) ...[
                         const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: () => setState(() => _selectedMood = null),
-                          child: Icon(
-                            Icons.close,
-                            size: 16,
-                            color: colorScheme.onSurfaceVariant,
+                        Text(
+                          _selectedMood != null
+                              ? 'Mood: $_selectedMood'
+                              : 'Add Mood',
+                          style: GoogleFonts.gabarito(
+                            fontWeight: FontWeight.w600,
+                            color: _selectedMood != null
+                                ? colorScheme.primary
+                                : colorScheme.onSurfaceVariant,
                           ),
                         ),
+                        if (_selectedMood != null) ...[
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () => setState(() => _selectedMood = null),
+                            child: Icon(
+                              Icons.close,
+                              size: 16,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
 
-          Container(
-            decoration: BoxDecoration(
-              color: colorScheme.surfaceContainer,
-              border: Border(
-                top: BorderSide(color: colorScheme.outlineVariant),
+            Container(
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainer,
+                border: Border(
+                  top: BorderSide(color: colorScheme.outlineVariant),
+                ),
               ),
-            ),
-            child: SafeArea(
-              top: false,
-              child: ListenableBuilder(
-                listenable: _quillController,
-                builder: (context, child) {
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          IconButton(
-                            tooltip: 'Undo',
-                            icon: const Icon(Icons.undo),
-                            onPressed: () => _quillController.undo(),
-                          ),
-                          IconButton(
-                            tooltip: 'Redo',
-                            icon: const Icon(Icons.redo),
-                            onPressed: () => _quillController.redo(),
-                          ),
-                          const VerticalDivider(width: 8),
-                          IconButton(
-                            tooltip: 'Bold',
-                            icon: Icon(
-                              Icons.format_bold,
-                              color: _isAttributeActive(quill.Attribute.bold)
-                                  ? colorScheme.primary
-                                  : colorScheme.onSurface,
+              child: SafeArea(
+                top: false,
+                child: ListenableBuilder(
+                  listenable: _quillController,
+                  builder: (context, child) {
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            IconButton(
+                              tooltip: 'Undo',
+                              icon: const Icon(Icons.undo),
+                              onPressed: () => _quillController.undo(),
                             ),
-                            onPressed: () =>
-                                _toggleAttribute(quill.Attribute.bold),
-                          ),
-                          IconButton(
-                            tooltip: 'Italic',
-                            icon: Icon(
-                              Icons.format_italic,
-                              color: _isAttributeActive(quill.Attribute.italic)
-                                  ? colorScheme.primary
-                                  : colorScheme.onSurface,
+                            IconButton(
+                              tooltip: 'Redo',
+                              icon: const Icon(Icons.redo),
+                              onPressed: () => _quillController.redo(),
                             ),
-                            onPressed: () =>
-                                _toggleAttribute(quill.Attribute.italic),
-                          ),
-                          IconButton(
-                            tooltip: 'Underline',
-                            icon: Icon(
-                              Icons.format_underlined,
-                              color:
-                                  _isAttributeActive(quill.Attribute.underline)
-                                  ? colorScheme.primary
-                                  : colorScheme.onSurface,
+                            const VerticalDivider(width: 8),
+                            IconButton(
+                              tooltip: 'Bold',
+                              icon: Icon(
+                                Icons.format_bold,
+                                color: _isAttributeActive(quill.Attribute.bold)
+                                    ? colorScheme.primary
+                                    : colorScheme.onSurface,
+                              ),
+                              onPressed: () =>
+                                  _toggleAttribute(quill.Attribute.bold),
                             ),
-                            onPressed: () =>
-                                _toggleAttribute(quill.Attribute.underline),
-                          ),
-                          IconButton(
-                            tooltip: 'Strikethrough',
-                            icon: Icon(
-                              Icons.format_strikethrough,
-                              color:
-                                  _isAttributeActive(
-                                    quill.Attribute.strikeThrough,
-                                  )
-                                  ? colorScheme.primary
-                                  : colorScheme.onSurface,
+                            IconButton(
+                              tooltip: 'Italic',
+                              icon: Icon(
+                                Icons.format_italic,
+                                color:
+                                    _isAttributeActive(quill.Attribute.italic)
+                                    ? colorScheme.primary
+                                    : colorScheme.onSurface,
+                              ),
+                              onPressed: () =>
+                                  _toggleAttribute(quill.Attribute.italic),
                             ),
-                            onPressed: () =>
-                                _toggleAttribute(quill.Attribute.strikeThrough),
-                          ),
-                          IconButton(
-                            tooltip: 'Link',
-                            icon: Icon(
-                              Icons.link,
-                              color: _isAttributeActive(quill.Attribute.link)
-                                  ? colorScheme.primary
-                                  : colorScheme.onSurface,
+                            IconButton(
+                              tooltip: 'Underline',
+                              icon: Icon(
+                                Icons.format_underlined,
+                                color:
+                                    _isAttributeActive(
+                                      quill.Attribute.underline,
+                                    )
+                                    ? colorScheme.primary
+                                    : colorScheme.onSurface,
+                              ),
+                              onPressed: () =>
+                                  _toggleAttribute(quill.Attribute.underline),
                             ),
-                            onPressed: () async {
-                              final textController = TextEditingController();
-                              final urlController = TextEditingController();
-                              final hasSelection =
-                                  !_quillController.selection.isCollapsed &&
-                                  _quillController.selection.isValid;
+                            IconButton(
+                              tooltip: 'Strikethrough',
+                              icon: Icon(
+                                Icons.format_strikethrough,
+                                color:
+                                    _isAttributeActive(
+                                      quill.Attribute.strikeThrough,
+                                    )
+                                    ? colorScheme.primary
+                                    : colorScheme.onSurface,
+                              ),
+                              onPressed: () => _toggleAttribute(
+                                quill.Attribute.strikeThrough,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Link',
+                              icon: Icon(
+                                Icons.link,
+                                color: _isAttributeActive(quill.Attribute.link)
+                                    ? colorScheme.primary
+                                    : colorScheme.onSurface,
+                              ),
+                              onPressed: () async {
+                                final textController = TextEditingController();
+                                final urlController = TextEditingController();
+                                final hasSelection =
+                                    !_quillController.selection.isCollapsed &&
+                                    _quillController.selection.isValid;
 
-                              if (hasSelection) {
-                                textController.text = _quillController.document
-                                    .getPlainText(
-                                      _quillController.selection.start,
-                                      _quillController.selection.end -
-                                          _quillController.selection.start,
-                                    );
-                              }
+                                if (hasSelection) {
+                                  textController.text = _quillController
+                                      .document
+                                      .getPlainText(
+                                        _quillController.selection.start,
+                                        _quillController.selection.end -
+                                            _quillController.selection.start,
+                                      );
+                                }
 
-                              final result =
-                                  await showDialog<Map<String, String>>(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                      title: Text(
-                                        'Insert Link',
-                                        style: TextStyle(
-                                          color: Theme.of(
-                                            ctx,
-                                          ).colorScheme.onSurface,
+                                final result =
+                                    await showDialog<Map<String, String>>(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        title: Text(
+                                          'Insert Link',
+                                          style: TextStyle(
+                                            color: Theme.of(
+                                              ctx,
+                                            ).colorScheme.onSurface,
+                                          ),
                                         ),
-                                      ),
-                                      content: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (!hasSelection)
+                                        content: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (!hasSelection)
+                                              TextField(
+                                                controller: textController,
+                                                style: TextStyle(
+                                                  color: Theme.of(
+                                                    ctx,
+                                                  ).colorScheme.onSurface,
+                                                ),
+                                                decoration:
+                                                    const InputDecoration(
+                                                      labelText: 'Text',
+                                                      hintText: '',
+                                                    ),
+                                              ),
                                             TextField(
-                                              controller: textController,
+                                              controller: urlController,
                                               style: TextStyle(
                                                 color: Theme.of(
                                                   ctx,
                                                 ).colorScheme.onSurface,
                                               ),
                                               decoration: const InputDecoration(
-                                                labelText: 'Text',
-                                                hintText: '',
+                                                labelText: 'URL',
+                                                hintText: 'aurachieve.com',
                                               ),
                                             ),
-                                          TextField(
-                                            controller: urlController,
-                                            style: TextStyle(
-                                              color: Theme.of(
-                                                ctx,
-                                              ).colorScheme.onSurface,
-                                            ),
-                                            decoration: const InputDecoration(
-                                              labelText: 'URL',
-                                              hintText: 'aurachieve.com',
-                                            ),
+                                          ],
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(ctx),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(ctx, {
+                                                  'text': textController.text,
+                                                  'url': urlController.text,
+                                                }),
+                                            child: const Text('OK'),
                                           ),
                                         ],
                                       ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () => Navigator.pop(ctx),
-                                          child: const Text('Cancel'),
-                                        ),
-                                        TextButton(
-                                          onPressed: () => Navigator.pop(ctx, {
-                                            'text': textController.text,
-                                            'url': urlController.text,
-                                          }),
-                                          child: const Text('OK'),
-                                        ),
-                                      ],
-                                    ),
-                                  );
+                                    );
 
-                              if (result != null && result['url']!.isNotEmpty) {
-                                final url = result['url']!;
-                                final text = result['text'] ?? url;
+                                if (result != null &&
+                                    result['url']!.isNotEmpty) {
+                                  final url = result['url']!;
+                                  final text = result['text'] ?? url;
 
-                                if (hasSelection) {
-                                  _quillController.formatSelection(
-                                    quill.LinkAttribute(url),
-                                  );
-                                } else {
-                                  final index =
-                                      _quillController.selection.baseOffset;
-                                  _quillController.document.insert(index, text);
-                                  _quillController.formatText(
-                                    index,
-                                    text.length,
-                                    quill.LinkAttribute(url),
-                                  );
+                                  if (hasSelection) {
+                                    _quillController.formatSelection(
+                                      quill.LinkAttribute(url),
+                                    );
+                                  } else {
+                                    final index =
+                                        _quillController.selection.baseOffset;
+                                    _quillController.document.insert(
+                                      index,
+                                      text,
+                                    );
+                                    _quillController.formatText(
+                                      index,
+                                      text.length,
+                                      quill.LinkAttribute(url),
+                                    );
+                                  }
                                 }
-                              }
-                            },
-                          ),
-                          const Spacer(),
-                          IconButton(
-                            tooltip: _toolbarExpanded ? 'Collapse' : 'More',
-                            icon: Icon(
-                              _toolbarExpanded
-                                  ? Icons.expand_less
-                                  : Icons.more_horiz,
+                              },
                             ),
-                            onPressed: () => setState(
-                              () => _toolbarExpanded = !_toolbarExpanded,
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (_toolbarExpanded)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                          child: Column(
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceAround,
-                                children: [
-                                  _buildMediaButton(
-                                    Icons.format_quote,
-                                    'Quote',
-                                    () => _toggleAttribute(
-                                      quill.Attribute.blockQuote,
-                                    ),
-                                    color:
-                                        _isAttributeActive(
-                                          quill.Attribute.blockQuote,
-                                        )
-                                        ? colorScheme.primary
-                                        : null,
-                                  ),
-                                  _buildMediaButton(
-                                    Icons.list,
-                                    'Bullet',
-                                    () => _toggleAttribute(quill.Attribute.ul),
-                                    color:
-                                        _isAttributeActive(quill.Attribute.ul)
-                                        ? colorScheme.primary
-                                        : null,
-                                  ),
-                                  _buildMediaButton(
-                                    Icons.format_list_numbered,
-                                    'Number',
-                                    () => _toggleAttribute(quill.Attribute.ol),
-                                    color:
-                                        _isAttributeActive(quill.Attribute.ol)
-                                        ? colorScheme.primary
-                                        : null,
-                                  ),
-                                ],
+                            const Spacer(),
+                            IconButton(
+                              tooltip: _toolbarExpanded ? 'Collapse' : 'More',
+                              icon: Icon(
+                                _toolbarExpanded
+                                    ? Icons.expand_less
+                                    : Icons.more_horiz,
                               ),
-                            ],
-                          ),
+                              onPressed: () => setState(
+                                () => _toolbarExpanded = !_toolbarExpanded,
+                              ),
+                            ),
+                          ],
                         ),
-                    ],
-                  );
-                },
+                        if (_toolbarExpanded)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                            child: Column(
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceAround,
+                                  children: [
+                                    _buildMediaButton(
+                                      Icons.format_quote,
+                                      'Quote',
+                                      () => _toggleAttribute(
+                                        quill.Attribute.blockQuote,
+                                      ),
+                                      color:
+                                          _isAttributeActive(
+                                            quill.Attribute.blockQuote,
+                                          )
+                                          ? colorScheme.primary
+                                          : null,
+                                    ),
+                                    _buildMediaButton(
+                                      Icons.list,
+                                      'Bullet',
+                                      () =>
+                                          _toggleAttribute(quill.Attribute.ul),
+                                      color:
+                                          _isAttributeActive(quill.Attribute.ul)
+                                          ? colorScheme.primary
+                                          : null,
+                                    ),
+                                    _buildMediaButton(
+                                      Icons.format_list_numbered,
+                                      'Number',
+                                      () =>
+                                          _toggleAttribute(quill.Attribute.ol),
+                                      color:
+                                          _isAttributeActive(quill.Attribute.ol)
+                                          ? colorScheme.primary
+                                          : null,
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
