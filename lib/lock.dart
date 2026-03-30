@@ -118,7 +118,6 @@ class _MorphingKeyState extends State<_MorphingKey>
 }
 
 class _LockScreenState extends State<LockScreen> {
-  
   final List<String> _pin = [];
   String? _firstPin;
   String _message = '';
@@ -126,7 +125,7 @@ class _LockScreenState extends State<LockScreen> {
 
   void _handleKeyPress(String key) {
     if (_pin.length >= 4) return;
-    
+
     setState(() {
       _pin.add(key);
       _isError = false;
@@ -137,8 +136,6 @@ class _LockScreenState extends State<LockScreen> {
       _submitPin();
     }
   }
-
-  
 
   void _handleDelete() {
     if (_pin.isEmpty) return;
@@ -155,14 +152,12 @@ class _LockScreenState extends State<LockScreen> {
 
     if (widget.isSetup) {
       if (_firstPin == null) {
-        
         setState(() {
           _firstPin = pinString;
           _pin.clear();
           _message = 'Confirm your PIN';
         });
       } else {
-        
         if (pinString == _firstPin) {
           if (widget.onPinEntered != null) {
             await widget.onPinEntered!(pinString);
@@ -176,7 +171,6 @@ class _LockScreenState extends State<LockScreen> {
         }
       }
     } else {
-      
       if (widget.onPinEntered != null) {
         final success = await widget.onPinEntered!(pinString);
         if (!success) {
@@ -241,21 +235,19 @@ class _LockScreenState extends State<LockScreen> {
                     children: List.generate(4, (index) {
                       final filled = index < _pin.length;
 
-                      
-                      
                       final ShapeBorder shape = switch (index) {
                         0 => const StarBorder(
                           points: 4,
                           innerRadiusRatio: 0.7,
                           pointRounding: 0.5,
-                        ), 
+                        ),
                         1 => RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
-                        ), 
-                        2 => const CircleBorder(), 
+                        ),
+                        2 => const CircleBorder(),
                         3 => const BeveledRectangleBorder(
                           borderRadius: BorderRadius.all(Radius.circular(10)),
-                        ), 
+                        ),
                         _ => const CircleBorder(),
                       };
 
@@ -319,7 +311,6 @@ class _LockScreenState extends State<LockScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      
                       Expanded(
                         child: GestureDetector(
                           onTap: _handleDelete,
@@ -342,12 +333,10 @@ class _LockScreenState extends State<LockScreen> {
                       const SizedBox(width: 16),
                       _buildKey('0'),
                       const SizedBox(width: 16),
-                      
+
                       Expanded(
                         child: GestureDetector(
-                          onTap: () {
-                            
-                          },
+                          onTap: () {},
                           child: Container(
                             height: 70,
                             decoration: BoxDecoration(
@@ -376,7 +365,6 @@ class _LockScreenState extends State<LockScreen> {
   }
 
   Widget _buildKey(String val) {
-    
     return _MorphingKey(label: val, onTap: () => _handleKeyPress(val));
   }
 }

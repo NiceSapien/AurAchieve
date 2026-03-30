@@ -40,18 +40,15 @@ class StatsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    int easy =
-        completedTasks
-            .where((t) => t.intensity == 'easy' && t.type == 'good')
-            .length;
-    int medium =
-        completedTasks
-            .where((t) => t.intensity == 'medium' && t.type == 'good')
-            .length;
-    int hard =
-        completedTasks
-            .where((t) => t.intensity == 'hard' && t.type == 'good')
-            .length;
+    int easy = completedTasks
+        .where((t) => t.intensity == 'easy' && t.type == 'good')
+        .length;
+    int medium = completedTasks
+        .where((t) => t.intensity == 'medium' && t.type == 'good')
+        .length;
+    int hard = completedTasks
+        .where((t) => t.intensity == 'hard' && t.type == 'good')
+        .length;
     int bad = completedTasks.where((t) => t.type == 'bad').length;
 
     final auraStatus = _auraStatus(aura);
@@ -288,23 +285,22 @@ class _LineChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint =
-        Paint()
-          ..color = color
-          ..strokeWidth = 4
-          ..style = PaintingStyle.stroke;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 4
+      ..style = PaintingStyle.stroke;
 
-    final pointPaint =
-        Paint()
-          ..color = color
-          ..style = PaintingStyle.fill;
+    final pointPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
 
     final int n = data.length;
     final double chartHeight = size.height - 32;
     final double chartWidth = size.width;
 
-    final double yRange =
-        (maxAura - minAura).abs() < 1e-6 ? 1 : (maxAura - minAura);
+    final double yRange = (maxAura - minAura).abs() < 1e-6
+        ? 1
+        : (maxAura - minAura);
     final double dx = n > 1 ? chartWidth / (n - 1) : 0;
 
     Path path = Path();

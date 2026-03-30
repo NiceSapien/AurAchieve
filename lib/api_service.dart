@@ -953,6 +953,40 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> editMemory(
+    String memoryId, {
+    String? name,
+    String? description,
+    bool? isPublic,
+    String? tag,
+    String? tagColor,
+    String? mood,
+    String? createdAt,
+    List<String>? files,
+  }) async {
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (description != null) body['description'] = description;
+    if (isPublic != null) body['public'] = isPublic;
+    if (createdAt != null) body['createdAt'] = createdAt;
+    if (tag != null) body['tag'] = tag;
+    if (tagColor != null) body['tagColor'] = tagColor;
+    if (mood != null) body['mood'] = mood;
+    if (files != null) body['files'] = files;
+
+    final response = await _performRequest(
+      'PUT',
+      '/api/memory-lanes/$memoryId',
+      body: jsonEncode(body),
+    );
+
+    if (response.statusCode == 200) {
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to edit memory: ${response.body}');
+    }
+  }
+
   Future<String> uploadMemoryFile(
     File file,
     String fileId, {
@@ -1013,24 +1047,27 @@ class ApiService {
     );
   }
 
-  Future<List<dynamic>> getMemories({int? length}) async {
+  Future<Map<String, dynamic>> getMemories({int? length, int? offset}) async {
     String endpoint = '/api/memory-lanes';
+    final queryParams = <String>[];
     if (length != null) {
-      endpoint += '?length=$length';
+      queryParams.add('length=$length');
+    }
+    if (offset != null) {
+      queryParams.add('offset=$offset');
+    }
+    if (queryParams.isNotEmpty) {
+      endpoint += '?${queryParams.join('&')}';
     }
 
     final response = await _performRequest('GET', endpoint);
 
     if (response.statusCode == 200) {
       final data = await compute(_parseJson, response.body);
-      if (data is List) return data;
       if (data is Map<String, dynamic>) {
-        if (data.containsKey('memories')) return data['memories'] as List;
-        if (data.containsKey('data')) return data['data'] as List;
-        if (data.containsKey('items')) return data['items'] as List;
-        if (data.containsKey('documents')) return data['documents'] as List;
+        return data;
       }
-      return [];
+      return {'documents': []};
     } else {
       throw Exception('Failed to load memories: ${response.body}');
     }

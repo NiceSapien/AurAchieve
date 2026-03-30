@@ -7,7 +7,7 @@ import 'api_service.dart';
 import 'screens/create_memory.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'screens/view_memory.dart';
-import 'utils/draft_utils.dart'; 
+import 'utils/draft_utils.dart';
 import 'lock.dart';
 
 class MemoryLanesPage extends StatefulWidget {
@@ -110,6 +110,10 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     _checkInitialState();
   }
 
+  int _currentOffset = 0;
+  static const int _pageSize = 30;
+  int _totalMemories = 0;
+
   void _onScroll() {
     if (_scrollController.position.pixels >=
             _scrollController.position.maxScrollExtent - 200 &&
@@ -153,11 +157,16 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     setState(() {
       _isLoadingMemories = true;
       _hasMore = true;
+      _currentOffset = 0;
     });
     try {
-      final memories = await widget.apiService.getMemories();
+      final response = await widget.apiService.getMemories(
+        length: _pageSize,
+        offset: _currentOffset,
+      );
+      final memories = response['documents'] as List<dynamic>? ?? [];
+      _totalMemories = response['total'] ?? 0;
 
-      
       final drafts = await DraftManager.getDrafts();
       final draftMemories = drafts
           .map(
@@ -172,7 +181,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                 d.timestamp,
               ).toIso8601String(),
               'isDraft': true,
-              'draftObject': d, 
+              'draftObject': d,
             },
           )
           .toList();
@@ -219,6 +228,9 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
         setState(() {
           _memories = [...draftMemories, ...memories];
           _groupMemoriesList();
+          _hasMore =
+              _memories.where((m) => m['isDraft'] != true).length <
+              _totalMemories;
         });
       }
     } catch (e) {
@@ -233,17 +245,68 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   }
 
   Future<void> _loadMoreMemories() async {
+    if (!_hasMore || _isLoadingMore) return;
     setState(() => _isLoadingMore = true);
+
+    final nextOffset = _currentOffset + _pageSize;
+
     try {
-      final newMemories = await widget.apiService.getMemories(length: 30);
+      final response = await widget.apiService.getMemories(
+        length: _pageSize,
+        offset: nextOffset,
+      );
+      final newMemories = response['documents'] as List<dynamic>? ?? [];
+      _totalMemories = response['total'] ?? _totalMemories;
+
       if (mounted) {
         if (newMemories.isEmpty) {
           setState(() => _hasMore = false);
         } else {
+          if (_localE2eStatus == 'true' &&
+              _unlockPasswordController.text.isNotEmpty) {
+            final key = encrypt.Key.fromUtf8(
+              _unlockPasswordController.text.padRight(32).substring(0, 32),
+            );
+            final encrypter = encrypt.Encrypter(encrypt.AES(key));
+
+            String decryptField(String text) {
+              try {
+                if (text.contains(':')) {
+                  final parts = text.split(':');
+                  if (parts.length == 2) {
+                    final iv = encrypt.IV.fromBase64(parts[0]);
+                    return encrypter.decrypt64(parts[1], iv: iv);
+                  }
+                }
+                return text;
+              } catch (e) {
+                return text;
+              }
+            }
+
+            for (var memory in newMemories) {
+              if (memory['public'] == true) continue;
+              if (memory['description'] != null) {
+                memory['description'] = decryptField(memory['description']);
+              }
+              if (memory['name'] != null)
+                memory['name'] = decryptField(memory['name']);
+              if (memory['tag'] != null)
+                memory['tag'] = decryptField(memory['tag']);
+              if (memory['tagColor'] != null)
+                memory['tagColor'] = decryptField(memory['tagColor']);
+              if (memory['mood'] != null)
+                memory['mood'] = decryptField(memory['mood']);
+            }
+          }
+
           setState(() {
-            final existingIds = _memories.map((m) => m['\$id']).toSet();
+            _currentOffset = nextOffset;
+            final existingIds = _memories
+                .map((m) => m[r'$id'] ?? m['id'])
+                .toSet();
             final uniqueNew = newMemories
-                .where((m) => !existingIds.contains(m['\$id']))
+                .where((m) => !existingIds.contains(m[r'$id'] ?? m['id']))
                 .toList();
 
             if (uniqueNew.isEmpty) {
@@ -251,11 +314,15 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
             } else {
               _memories.addAll(uniqueNew);
               _groupMemoriesList();
+              _hasMore =
+                  _memories.where((m) => m['isDraft'] != true).length <
+                  _totalMemories;
             }
           });
         }
       }
     } catch (e) {
+      debugPrint('Load more failed: $e');
     } finally {
       if (mounted) setState(() => _isLoadingMore = false);
     }
@@ -349,8 +416,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
       ),
     );
   }
-
-  
 
   Future<void> _showPinSetupDialog() async {
     if (_pin != null) {
@@ -854,7 +919,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                       ),
                     ),
                   );
-                  
+
                   if (result == true || result == null) {
                     _loadMemories();
                   }
@@ -945,8 +1010,11 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   Future<void> _openMemory(dynamic memory) async {
     final result = await Navigator.of(context).push<bool?>(
       MaterialPageRoute(
-        builder: (_) =>
-            MemoryDetailPage(memory: memory, apiService: widget.apiService),
+        builder: (_) => MemoryDetailPage(
+          memory: memory,
+          apiService: widget.apiService,
+          e2eEnabled: _localE2eStatus == 'true',
+        ),
       ),
     );
     if (result == true) {

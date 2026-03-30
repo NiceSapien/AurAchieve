@@ -69,19 +69,17 @@ class DraftManager {
         .whereType<DraftMemory>()
         .toList();
 
-    
     final now = DateTime.now();
     final validDrafts = drafts.where((d) {
       final date = DateTime.fromMillisecondsSinceEpoch(d.timestamp);
       return now.difference(date) <= _retention;
     }).toList();
 
-    
     if (validDrafts.length < drafts.length) {
       await saveAllDrafts(validDrafts);
     }
 
-    debugPrint('DraftManager: Loaded ${validDrafts.length} drafts'); 
+    debugPrint('DraftManager: Loaded ${validDrafts.length} drafts');
     return validDrafts..sort((a, b) => b.timestamp.compareTo(a.timestamp));
   }
 
@@ -96,9 +94,7 @@ class DraftManager {
     }
 
     await saveAllDrafts(drafts);
-    debugPrint(
-      'DraftManager: Saved draft ${draft.id} (${draft.title})',
-    ); 
+    debugPrint('DraftManager: Saved draft ${draft.id} (${draft.title})');
   }
 
   static Future<void> deleteDraft(String id) async {

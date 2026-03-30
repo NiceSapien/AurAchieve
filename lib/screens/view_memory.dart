@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import '../api_service.dart';
+import 'create_memory.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:intl/intl.dart';
 import 'package:video_player/video_player.dart';
@@ -14,8 +15,14 @@ import 'package:audioplayers/audioplayers.dart';
 class MemoryDetailPage extends StatefulWidget {
   final Map<String, dynamic> memory;
   final ApiService? apiService;
+  final bool e2eEnabled;
 
-  const MemoryDetailPage({super.key, required this.memory, this.apiService});
+  const MemoryDetailPage({
+    super.key,
+    required this.memory,
+    this.apiService,
+    this.e2eEnabled = false,
+  });
 
   @override
   State<MemoryDetailPage> createState() => _MemoryDetailPageState();
@@ -190,6 +197,14 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                   }
                   return;
                 }
+
+                List<String>? fileIds;
+                if (widget.memory['files'] is List) {
+                  fileIds = (widget.memory['files'] as List)
+                      .map((e) => e.toString())
+                      .toList();
+                }
+
                 if (!context.mounted) return;
                 final confirmed = await showDialog<bool>(
                   context: context,
@@ -235,6 +250,21 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                       );
                     }
                   }
+                }
+              } else if (choice == 'edit') {
+                if (widget.apiService == null) return;
+                if (!context.mounted) return;
+                final result = await Navigator.of(context).push<bool?>(
+                  MaterialPageRoute(
+                    builder: (_) => CreateMemoryPage(
+                      apiService: widget.apiService!,
+                      existingMemory: widget.memory,
+                      e2eEnabled: widget.e2eEnabled,
+                    ),
+                  ),
+                );
+                if (result == true && context.mounted) {
+                  Navigator.of(context).pop(true);
                 }
               }
             },

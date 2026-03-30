@@ -22,12 +22,14 @@ class CreateMemoryPage extends StatefulWidget {
   final ApiService apiService;
   final bool e2eEnabled;
   final DraftMemory? draft;
+  final Map<String, dynamic>? existingMemory;
 
   const CreateMemoryPage({
     super.key,
     required this.apiService,
     this.e2eEnabled = false,
     this.draft,
+    this.existingMemory,
   });
 
   @override
@@ -48,11 +50,10 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   DateTime _selectedDate = DateTime.now();
   bool _toolbarExpanded = false;
   bool _hasUnsavedChanges = false;
+  bool _skipSaveDraft = false;
   Timer? _autoSaveTimer;
   String? _currentDraftId;
-
-  
-  
+  List<String> _existingFileIds = [];
 
   List<String> _recentMoods = [];
 
@@ -93,16 +94,46 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
       }
     });
 
-    
-    if (widget.draft != null) {
+    if (widget.existingMemory != null) {
+      _currentDraftId =
+          (widget.existingMemory![r'$id'] ??
+                  widget.existingMemory!['id'] ??
+                  widget.existingMemory!['memoryId'])
+              ?.toString() ??
+          const Uuid().v4();
+      _titleController.text = widget.existingMemory!['name'] ?? '';
+      _tagController.text = (widget.existingMemory!['tag'] ?? '').toString();
+      _selectedColor = widget.existingMemory!['tagColor'] ?? 'blue';
+      _selectedMood = widget.existingMemory!['mood'];
+      _isPublic = widget.existingMemory!['public'] == true;
+      if (widget.existingMemory!['createdAt'] != null) {
+        try {
+          _selectedDate = DateTime.parse(widget.existingMemory!['createdAt']);
+        } catch (_) {}
+      }
+      final desc = widget.existingMemory!['description'] ?? '';
+      try {
+        final json = jsonDecode(desc);
+        _quillController = quill.QuillController(
+          document: quill.Document.fromJson(json),
+          selection: const TextSelection.collapsed(offset: 0),
+        );
+      } catch (e) {
+        _quillController = quill.QuillController(
+          document: quill.Document()..insert(0, desc),
+          selection: const TextSelection.collapsed(offset: 0),
+        );
+      }
+      if (widget.existingMemory!['files'] is List) {
+        _existingFileIds = List<String>.from(widget.existingMemory!['files']);
+      }
+    } else if (widget.draft != null) {
       _currentDraftId = widget.draft!.id;
       _restoreDraft(widget.draft!);
     } else {
-      
       _currentDraftId = const Uuid().v4();
     }
 
-    
     _titleController.addListener(_onContentChanged);
     _tagController.addListener(_onContentChanged);
     _quillController.document.changes.listen((event) {
@@ -118,8 +149,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
     _autoSaveTimer = Timer(const Duration(seconds: 2), _saveDraft);
   }
 
-  
-
   void _restoreDraft(DraftMemory draft) {
     setState(() {
       _titleController.text = draft.title;
@@ -131,7 +160,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
           final delta = jsonDecode(draft.description);
           final doc = quill.Document.fromJson(delta);
 
-          
           final oldController = _quillController;
           _quillController = quill.QuillController(
             document: doc,
@@ -141,7 +169,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
         } catch (_) {}
       }
 
-      
       _mediaFiles.clear();
       _mediaTypes.clear();
       for (int i = 0; i < draft.mediaPaths.length; i++) {
@@ -160,11 +187,12 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   }
 
   Future<void> _saveDraft() async {
+    if (_skipSaveDraft || widget.existingMemory != null) return;
+
     final prefs = await SharedPreferences.getInstance();
     final saveDrafts = prefs.getBool('save_drafts') ?? true;
     if (!saveDrafts) return;
 
-    
     if (_titleController.text.isEmpty &&
         _tagController.text.isEmpty &&
         _quillController.document.isEmpty() &&
@@ -172,7 +200,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
       return;
     }
 
-    
     if (_currentDraftId == null) {
       _currentDraftId = const Uuid().v4();
     }
@@ -193,18 +220,16 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   }
 
   Future<void> _deleteCurrentDraft() async {
+    _skipSaveDraft = true;
     if (_currentDraftId != null) {
       await DraftManager.deleteDraft(_currentDraftId!);
-    }
-    if (mounted) {
-      Navigator.pop(context); 
     }
   }
 
   @override
   void dispose() {
     _autoSaveTimer?.cancel();
-    _saveDraft(); 
+    _saveDraft();
     _titleController.dispose();
     _tagController.dispose();
     _quillController.dispose();
@@ -240,7 +265,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
             style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
           ),
           content: Text(
-            'Media attachments (images, videos, audio) are NOT end-to-end encrypted. They are, however, encrypted and secured from other people.',
+            'Media attachments (images, videos, audio) are NOT encrypted.',
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
@@ -258,22 +283,10 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
 
   Future<void> _pickImage() async {
     await _checkE2EWarning();
-    if (_mediaFiles.length >= 3) {
-      _showError('Max 3 files allowed');
-      return;
-    }
-    if (_mediaTypes.where((t) => t == 'image').length >= 2) {
-      _showError('Max 2 images allowed');
-      return;
-    }
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery);
     if (picked != null) {
       final file = File(picked.path);
-      if (await file.length() > 30 * 1024 * 1024) {
-        _showError('File too large (Max 30MB)');
-        return;
-      }
 
       final dir = await getTemporaryDirectory();
       final targetPath =
@@ -295,24 +308,12 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
 
   Future<void> _pickVideo() async {
     await _checkE2EWarning();
-    if (_mediaFiles.length >= 3) {
-      _showError('Max 3 files allowed');
-      return;
-    }
-    if (_mediaTypes.contains('video')) {
-      _showError('Max 1 video allowed');
-      return;
-    }
     final picker = ImagePicker();
     final picked = await picker.pickVideo(source: ImageSource.gallery);
     if (picked != null) {
       final file = File(picked.path);
       if (!file.path.toLowerCase().endsWith('.mp4')) {
         _showError('Only .mp4 videos are allowed');
-        return;
-      }
-      if (await file.length() > 30 * 1024 * 1024) {
-        _showError('File too large (Max 30MB)');
         return;
       }
       setState(() {
@@ -324,14 +325,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
 
   Future<void> _showRecordingDialog() async {
     await _checkE2EWarning();
-    if (_mediaFiles.length >= 3) {
-      _showError('Max 3 files allowed');
-      return;
-    }
-    if (_mediaTypes.contains('audio')) {
-      _showError('Max 1 audio file allowed');
-      return;
-    }
 
     final file = await showDialog<File>(
       context: context,
@@ -340,10 +333,6 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
     );
 
     if (file != null) {
-      if (await file.length() > 30 * 1024 * 1024) {
-        _showError('Recording too large');
-        return;
-      }
       setState(() {
         _mediaFiles.add(file);
         _mediaTypes.add('audio');
@@ -367,7 +356,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
 
     setState(() => _isSaving = true);
     try {
-      List<String> fileIds = [];
+      List<String> fileIds = List.from(_existingFileIds);
       for (int i = 0; i < _mediaFiles.length; i++) {
         final file = _mediaFiles[i];
         final type = _mediaTypes[i];
@@ -417,16 +406,38 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
         }
       }
 
-      await widget.apiService.createMemory(
-        name: name,
-        description: description,
-        isPublic: _isPublic,
-        tag: tag,
-        tagColor: tagColor,
-        mood: mood,
-        createdAt: _selectedDate.toIso8601String(),
-        files: fileIds.isNotEmpty ? fileIds : null,
-      );
+      if (widget.existingMemory != null) {
+        final existingId =
+            (widget.existingMemory![r'$id'] ??
+                    widget.existingMemory!['id'] ??
+                    widget.existingMemory!['memoryId'])
+                .toString();
+        await widget.apiService.editMemory(
+          existingId,
+          name: name,
+          description: description,
+          isPublic: _isPublic,
+          tag: tag,
+          tagColor: tagColor,
+          mood: mood,
+          createdAt: _selectedDate.toIso8601String(),
+          files: fileIds.isNotEmpty ? fileIds : null,
+        );
+      } else {
+        await widget.apiService.createMemory(
+          name: name,
+          description: description,
+          isPublic: _isPublic,
+          tag: tag,
+          tagColor: tagColor,
+          mood: mood,
+          createdAt: _selectedDate.toIso8601String(),
+          files: fileIds.isNotEmpty ? fileIds : null,
+        );
+      }
+
+      await _deleteCurrentDraft();
+
       if (mounted) {
         Navigator.of(context).pop(true);
       }
@@ -687,7 +698,10 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop && _hasUnsavedChanges) {
+        if (didPop &&
+            _hasUnsavedChanges &&
+            !_skipSaveDraft &&
+            widget.existingMemory == null) {
           await _saveDraft();
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -811,6 +825,9 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                   );
                   if (confirm == true) {
                     await _deleteCurrentDraft();
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                    }
                   }
                 },
               ),
