@@ -66,6 +66,104 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     const Color(0xFFFF8A65),
   ];
 
+  bool _isSearching = false;
+  String _searchQuery = '';
+  final _searchController = TextEditingController();
+  bool _isDeepSearching = false;
+
+  List<dynamic> get _searchResults {
+    if (_searchQuery.isEmpty) return [];
+    final query = _searchQuery.toLowerCase();
+    return _memories.where((m) {
+      final name = (m['name']?.toString() ?? '').toLowerCase();
+      final desc = (m['description']?.toString() ?? '').toLowerCase();
+      final tag = (m['tag']?.toString() ?? '').toLowerCase();
+      return name.contains(query) ||
+          desc.contains(query) ||
+          tag.contains(query);
+    }).toList();
+  }
+
+  Future<void> _deepSearch() async {
+    setState(() {
+      _isDeepSearching = true;
+    });
+    try {
+      final nextOffset = _currentOffset + _pageSize;
+      final response = await widget.apiService.getMemories(
+        length: 100, // Fetch a larger chunk for deep search
+        offset: nextOffset,
+      );
+      final newMemories = response['documents'] as List<dynamic>? ?? [];
+      _totalMemories = response['total'] ?? _totalMemories;
+
+      if (_localE2eStatus == 'true' &&
+          _unlockPasswordController.text.isNotEmpty) {
+        final key = encrypt.Key.fromUtf8(
+          _unlockPasswordController.text.padRight(32).substring(0, 32),
+        );
+        final encrypter = encrypt.Encrypter(encrypt.AES(key));
+
+        String decryptField(String text) {
+          try {
+            if (text.contains(':')) {
+              final parts = text.split(':');
+              if (parts.length == 2) {
+                final iv = encrypt.IV.fromBase64(parts[0]);
+                return encrypter.decrypt64(parts[1], iv: iv);
+              }
+            }
+            return text;
+          } catch (e) {
+            return text;
+          }
+        }
+
+        for (var memory in newMemories) {
+          if (memory['public'] == true) continue;
+          if (memory['description'] != null) {
+            memory['description'] = decryptField(memory['description']);
+          }
+          if (memory['name'] != null) {
+            memory['name'] = decryptField(memory['name']);
+          }
+          if (memory['tag'] != null) {
+            memory['tag'] = decryptField(memory['tag']);
+          }
+          if (memory['tagColor'] != null) {
+            memory['tagColor'] = decryptField(memory['tagColor']);
+          }
+          if (memory['mood'] != null) {
+            memory['mood'] = decryptField(memory['mood']);
+          }
+        }
+      }
+
+      setState(() {
+        _currentOffset =
+            nextOffset + 100 - _pageSize; // rough approximation of new offset
+        final existingIds = _memories.map((m) => m['id'] ?? m['\$id']).toSet();
+        final uniqueNew = newMemories
+            .where((m) => !existingIds.contains(m['id'] ?? m['\$id']))
+            .toList();
+
+        _memories.addAll(uniqueNew);
+        _groupMemoriesList();
+        _hasMore =
+            _memories.where((m) => m['isDraft'] != true).length <
+            _totalMemories;
+      });
+    } catch (e) {
+      debugPrint('Deep search failed: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDeepSearching = false;
+        });
+      }
+    }
+  }
+
   void _groupMemoriesList() {
     _groupedMemories = {};
     for (var memory in _memories) {
@@ -534,22 +632,61 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   Widget _buildMainView(BuildContext context, ColorScheme colorScheme) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Memory Lanes'),
-        centerTitle: true,
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search memories...',
+                  border: InputBorder.none,
+                ),
+                style: GoogleFonts.gabarito(color: colorScheme.onSurface),
+                onChanged: (val) {
+                  setState(() {
+                    _searchQuery = val;
+                  });
+                },
+              )
+            : const Text('Memory Lanes'),
+        centerTitle: !_isSearching,
+        leading: _isSearching
+            ? IconButton(
+                icon: Icon(
+                  Icons.arrow_back_rounded,
+                  color: colorScheme.onSurface,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _isSearching = false;
+                    _searchQuery = '';
+                    _searchController.clear();
+                  });
+                },
+              )
+            : null,
         actions: [
-          IconButton(
-            icon: Icon(
-              _pin != null ? Icons.lock : Icons.lock_open,
-              color: colorScheme.onSurface,
+          if (!_isSearching)
+            IconButton(
+              icon: Icon(Icons.search_rounded, color: colorScheme.onSurface),
+              tooltip: 'Search',
+              onPressed: () => setState(() => _isSearching = true),
             ),
-            tooltip: 'Lock Settings',
-            onPressed: _showPinSetupDialog,
-          ),
+          if (!_isSearching)
+            IconButton(
+              icon: Icon(
+                _pin != null ? Icons.lock : Icons.lock_open,
+                color: colorScheme.onSurface,
+              ),
+              tooltip: 'Lock Settings',
+              onPressed: _showPinSetupDialog,
+            ),
           const SizedBox(width: 8),
         ],
       ),
       body: _isLoadingMemories
           ? const Center(child: CircularProgressIndicator())
+          : _isSearching
+          ? _buildSearchResults(context, colorScheme)
           : _memories.isEmpty
           ? Center(
               child: Column(
@@ -590,6 +727,96 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
         },
         child: const Icon(Icons.add),
       ),
+    );
+  }
+
+  Widget _buildSearchResults(BuildContext context, ColorScheme colorScheme) {
+    if (_searchQuery.isEmpty) {
+      return Center(
+        child: Text(
+          'Type to search...',
+          style: GoogleFonts.gabarito(
+            fontSize: 18,
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+      );
+    }
+
+    final results = _searchResults;
+
+    if (results.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              size: 64,
+              color: colorScheme.outline,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No local results found.',
+              style: GoogleFonts.gabarito(
+                fontSize: 18,
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 24),
+            if (_hasMore)
+              _isDeepSearching
+                  ? const CircularProgressIndicator()
+                  : FilledButton.icon(
+                      onPressed: _deepSearch,
+                      icon: const Icon(Icons.travel_explore),
+                      label: const Text('Search with more power'),
+                    )
+            else if (!_isDeepSearching)
+              Text(
+                'All memories searched.',
+                style: GoogleFonts.gabarito(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: results.length + 1,
+      itemBuilder: (context, index) {
+        if (index == results.length) {
+          if (_hasMore) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: _isDeepSearching
+                    ? const CircularProgressIndicator()
+                    : FilledButton.tonalIcon(
+                        onPressed: _deepSearch,
+                        icon: const Icon(Icons.travel_explore),
+                        label: const Text('Search with more power'),
+                      ),
+              ),
+            );
+          }
+          return const SizedBox(height: 32);
+        }
+
+        final memory = results[index];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _buildMemoryCard(
+            context,
+            colorScheme,
+            memory,
+            _getColor(memory['tagColor']),
+          ),
+        );
+      },
     );
   }
 
