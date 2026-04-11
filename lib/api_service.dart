@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'main.dart';
 
 dynamic _parseJson(String jsonString) {
   return jsonDecode(jsonString);
@@ -146,6 +147,14 @@ class ApiService {
         retryCount: retryCount + 1,
         overrideUrl: overrideUrl,
       );
+    }
+
+    if (response.statusCode == 403) {
+      final context = navigatorKey.currentContext;
+      if (context != null) {
+        showEmailVerificationFlow(context, account);
+      }
+      throw Exception('Forbidden: Email not verified.');
     }
 
     return response;

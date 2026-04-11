@@ -61,6 +61,9 @@ Future<void> _initializeTimezone() async {
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+bool isVerificationDialogOpen = false;
+
 Future<void> _initializeNotifications() async {
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/launcher_icon');
@@ -167,6 +170,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         }
 
         return MaterialApp(
+          navigatorKey: navigatorKey,
           theme: ThemeData(
             colorScheme: lightColorScheme,
             textTheme: GoogleFonts.gabaritoTextTheme(),
@@ -514,7 +518,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                     TextField(
                       controller: controller,
                       decoration: InputDecoration(
-                        hintText: 'http://localhost:3000',
+                        hintText: 'https://api.aurachieve.com',
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -570,7 +574,24 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
   Future<void> _handleSuccessfulAuth() async {
     if (!mounted) return;
 
+    setState(() => isBusy = true);
+    try {
+      final user = await widget.account.get();
+      
+      if (!user.emailVerification) {
+        if (mounted) {
+          setState(() => isBusy = false);
+          await showEmailVerificationFlow(context, widget.account);
+        }
+        return;
+      }
+    } catch (e) {
+      // Ignored, might be a network issue but let them through or throw error.
+      // Usually getting the account works if JWT succeeded.
+    }
+
     if (mounted) {
+      setState(() => isBusy = false);
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -1346,4 +1367,207 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
       ),
     );
   }
+}
+
+Future<void> showEmailVerificationFlow(
+  BuildContext context,
+  appwrite.Account account,
+) async {
+  if (isVerificationDialogOpen) return;
+  isVerificationDialogOpen = true;
+
+  await showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) {
+      bool isLoading = true;
+      String? email;
+      bool emailSent = false;
+      bool checking = false;
+      bool canResend = false;
+
+      return StatefulBuilder(
+        builder: (context, setState) {
+          if (isLoading) {
+            account
+                .get()
+                .then((user) {
+                  if (context.mounted) {
+                    setState(() {
+                      email = user.email;
+                      isLoading = false;
+                    });
+                  }
+                })
+                .catchError((e) {
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                  }
+                });
+            return AlertDialog(
+              content: const SizedBox(
+                height: 50,
+                width: 50,
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            );
+          }
+
+          if (checking) {
+            return AlertDialog(
+              content: const SizedBox(
+                height: 50,
+                width: 50,
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            );
+          }
+
+          if (emailSent) {
+            return AlertDialog(
+              title: const Text('Verify your email'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [Text('Success - Verification sent to $email.')],
+              ),
+              actions: [
+                if (canResend)
+                  TextButton(
+                    onPressed: () async {
+                      setState(() {
+                        checking = true;
+                      });
+                      try {
+                        await account.createEmailVerification(
+                          url: 'https://aurachieve.web.app/verify',
+                        );
+                        if (context.mounted) {
+                          setState(() {
+                            checking = false;
+                            canResend = false;
+                          });
+                          Future.delayed(const Duration(seconds: 30), () {
+                            if (context.mounted)
+                              setState(() {
+                                canResend = true;
+                              });
+                          });
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          setState(() {
+                            checking = false;
+                          });
+                          ScaffoldMessenger.of(
+                            context,
+                          ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                        }
+                      }
+                    },
+                    child: const Text('Resend email'),
+                  ),
+                TextButton(
+                  onPressed: () async {
+                    setState(() {
+                      checking = true;
+                    });
+                    try {
+                      final user = await account.get();
+                      if (context.mounted) {
+                        if (user.emailVerification) {
+                          Navigator.pop(context);
+                          navigatorKey.currentState!.pushReplacement(
+                            MaterialPageRoute(
+                              builder: (context) => HomePage(account: account),
+                            ),
+                          );
+                        } else {
+                          setState(() {
+                            checking = false;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Email is still not verified.'),
+                            ),
+                          );
+                        }
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        setState(() {
+                          checking = false;
+                        });
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                      }
+                    }
+                  },
+                  child: const Text('Continue'),
+                ),
+              ],
+            );
+          }
+
+          return AlertDialog(
+            title: const Text('Verify your email'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  "You need to verify your email to use AurAchieve. We'll send a link to the email below to verify it.",
+                ),
+                const SizedBox(height: 16),
+                Text(email ?? ''),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  setState(() {
+                    checking = true;
+                  });
+                  try {
+                    await account.createEmailVerification(
+                      url: 'https://aurachieve.web.app/verify',
+                    );
+                    if (context.mounted) {
+                      setState(() {
+                        emailSent = true;
+                        checking = false;
+                      });
+                      Future.delayed(const Duration(seconds: 30), () {
+                        if (context.mounted)
+                          setState(() {
+                            canResend = true;
+                          });
+                      });
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      setState(() {
+                        checking = false;
+                      });
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                    }
+                  }
+                },
+                child: const Text('Continue'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+  isVerificationDialogOpen = false;
 }
