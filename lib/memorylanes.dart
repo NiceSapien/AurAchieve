@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
@@ -23,6 +26,7 @@ class MemoryLanesPage extends StatefulWidget {
 class _MemoryLanesPageState extends State<MemoryLanesPage>
     with TickerProviderStateMixin {
   int _currentStep = 1;
+  bool _isInitializing = true;
   late final AnimationController _introController;
   bool _showIntroAnimation = true;
   bool _e2eEnabled = false;
@@ -91,7 +95,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     try {
       final nextOffset = _currentOffset + _pageSize;
       final response = await widget.apiService.getMemories(
-        length: 100, // Fetch a larger chunk for deep search
+        length: 100,
         offset: nextOffset,
       );
       final newMemories = response['documents'] as List<dynamic>? ?? [];
@@ -99,12 +103,14 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
 
       if (_localE2eStatus == 'true' &&
           _unlockPasswordController.text.isNotEmpty) {
+        bool badPassword = false;
         final key = encrypt.Key.fromUtf8(
           _unlockPasswordController.text.padRight(32).substring(0, 32),
         );
         final encrypter = encrypt.Encrypter(encrypt.AES(key));
 
         String decryptField(String text) {
+          if (badPassword) return text;
           try {
             if (text.contains(':')) {
               final parts = text.split(':');
@@ -115,11 +121,13 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
             }
             return text;
           } catch (e) {
+            badPassword = true;
             return text;
           }
         }
 
         for (var memory in newMemories) {
+          if (badPassword) break;
           if (memory['public'] == true) continue;
           if (memory['description'] != null) {
             memory['description'] = decryptField(memory['description']);
@@ -137,11 +145,25 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
             memory['mood'] = decryptField(memory['mood']);
           }
         }
+
+        if (badPassword) {
+          await _storage.delete(key: 'memory_lanes_password');
+          if (mounted) {
+            setState(() {
+              _isUnlocked = false;
+              _unlockPasswordController.clear();
+              _isDeepSearching = false;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Incorrect encryption password!')),
+            );
+          }
+          return;
+        }
       }
 
       setState(() {
-        _currentOffset =
-            nextOffset + 100 - _pageSize; // rough approximation of new offset
+        _currentOffset = nextOffset + 100 - _pageSize;
         final existingIds = _memories.map((m) => m['id'] ?? m['\$id']).toSet();
         final uniqueNew = newMemories
             .where((m) => !existingIds.contains(m['id'] ?? m['\$id']))
@@ -225,10 +247,12 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   Future<void> _checkInitialState() async {
     final pin = await _storage.read(key: 'memory_lanes_pin');
     if (pin != null) {
-      setState(() {
-        _pin = pin;
-        _isPinLocked = true;
-      });
+      if (mounted) {
+        setState(() {
+          _pin = pin;
+          _isPinLocked = true;
+        });
+      }
     }
 
     if (_localE2eStatus != null) {
@@ -241,6 +265,12 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
       } else {
         _unlock();
       }
+    }
+
+    if (mounted) {
+      setState(() {
+        _isInitializing = false;
+      });
     }
   }
 
@@ -286,12 +316,14 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
 
       if (_localE2eStatus == 'true' &&
           _unlockPasswordController.text.isNotEmpty) {
+        bool badPassword = false;
         final key = encrypt.Key.fromUtf8(
           _unlockPasswordController.text.padRight(32).substring(0, 32),
         );
         final encrypter = encrypt.Encrypter(encrypt.AES(key));
 
         String decryptField(String text) {
+          if (badPassword) return text;
           try {
             if (text.contains(':')) {
               final parts = text.split(':');
@@ -302,23 +334,43 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
             }
             return text;
           } catch (e) {
+            badPassword = true;
             return text;
           }
         }
 
         for (var memory in memories) {
+          if (badPassword) break;
           if (memory['public'] == true) continue;
           if (memory['description'] != null) {
             memory['description'] = decryptField(memory['description']);
           }
-          if (memory['name'] != null)
+          if (memory['name'] != null) {
             memory['name'] = decryptField(memory['name']);
-          if (memory['tag'] != null)
+          }
+          if (memory['tag'] != null) {
             memory['tag'] = decryptField(memory['tag']);
-          if (memory['tagColor'] != null)
+          }
+          if (memory['tagColor'] != null) {
             memory['tagColor'] = decryptField(memory['tagColor']);
-          if (memory['mood'] != null)
+          }
+          if (memory['mood'] != null) {
             memory['mood'] = decryptField(memory['mood']);
+          }
+        }
+
+        if (badPassword) {
+          await _storage.delete(key: 'memory_lanes_password');
+          if (mounted) {
+            setState(() {
+              _isUnlocked = false;
+              _unlockPasswordController.clear();
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Incorrect encryption password!')),
+            );
+          }
+          return;
         }
       }
 
@@ -362,12 +414,14 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
         } else {
           if (_localE2eStatus == 'true' &&
               _unlockPasswordController.text.isNotEmpty) {
+            bool badPassword = false;
             final key = encrypt.Key.fromUtf8(
               _unlockPasswordController.text.padRight(32).substring(0, 32),
             );
             final encrypter = encrypt.Encrypter(encrypt.AES(key));
 
             String decryptField(String text) {
+              if (badPassword) return text;
               try {
                 if (text.contains(':')) {
                   final parts = text.split(':');
@@ -378,23 +432,41 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                 }
                 return text;
               } catch (e) {
+                badPassword = true;
                 return text;
               }
             }
 
             for (var memory in newMemories) {
+              if (badPassword) break;
               if (memory['public'] == true) continue;
               if (memory['description'] != null) {
                 memory['description'] = decryptField(memory['description']);
               }
-              if (memory['name'] != null)
+              if (memory['name'] != null) {
                 memory['name'] = decryptField(memory['name']);
-              if (memory['tag'] != null)
+              }
+              if (memory['tag'] != null) {
                 memory['tag'] = decryptField(memory['tag']);
-              if (memory['tagColor'] != null)
+              }
+              if (memory['tagColor'] != null) {
                 memory['tagColor'] = decryptField(memory['tagColor']);
-              if (memory['mood'] != null)
+              }
+              if (memory['mood'] != null) {
                 memory['mood'] = decryptField(memory['mood']);
+              }
+            }
+
+            if (badPassword) {
+              await _storage.delete(key: 'memory_lanes_password');
+              setState(() {
+                _isUnlocked = false;
+                _unlockPasswordController.clear();
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Incorrect encryption password!')),
+              );
+              return;
             }
           }
 
@@ -447,6 +519,13 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
 
   @override
   Widget build(BuildContext context) {
+    if (_isInitializing) {
+      return Scaffold(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final colorScheme = Theme.of(context).colorScheme;
 
     if (_isPinLocked) {
@@ -588,26 +667,32 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.lock_outline_rounded,
-              size: 64,
-              color: colorScheme.primary,
+            Container(
+              constraints: const BoxConstraints(maxWidth: 200, maxHeight: 200),
+              child: Lottie.asset(
+                'assets/anim/safe.json',
+                repeat: false,
+                fit: BoxFit.contain,
+              ),
             ),
             const SizedBox(height: 24),
             Text(
-              'Enter Password',
+              'Enter encryption password',
               style: GoogleFonts.gabarito(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
+                color: colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _unlockPasswordController,
               obscureText: true,
-              decoration: const InputDecoration(
+              style: TextStyle(color: colorScheme.onSurface),
+              decoration: InputDecoration(
                 labelText: 'Encryption Password',
-                border: OutlineInputBorder(),
+                labelStyle: TextStyle(color: colorScheme.onSurfaceVariant),
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 24),
@@ -622,6 +707,28 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                 }
               },
               child: const Text('Unlock'),
+            ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Forgot or Lost your Key?'),
+                    content: Text(
+                      "Unfortunately, since Memory Lanes uses End-to-End Encryption, we do not store your key on our servers to ensure complete privacy. \n\nWe don't know it, you forgot it... meaning it's gone. HAHAHAHAHA! We're sorry to say but your encrypted memories are permanently inaccessible. There is no way to recover them.",
+                      style: TextStyle(color: colorScheme.onSurfaceVariant),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Okay :('),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              child: const Text('Forgot/lost encryption password?'),
             ),
           ],
         ),
@@ -670,6 +777,48 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
               icon: Icon(Icons.search_rounded, color: colorScheme.onSurface),
               tooltip: 'Search',
               onPressed: () => setState(() => _isSearching = true),
+            ),
+          if (!_isSearching && _localE2eStatus == 'true' && _isUnlocked)
+            IconButton(
+              icon: Icon(Icons.key_rounded, color: colorScheme.onSurface),
+              tooltip: 'View Encryption Password',
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Your Encryption Password'),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Save this key securely! If you log into a new device and forget it, your memories will be lost forever!',
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        SelectableText(
+                          _unlockPasswordController.text,
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Close'),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           if (!_isSearching)
             IconButton(
@@ -1527,50 +1676,195 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                           ),
                         ),
                         value: _e2eEnabled,
-                        onChanged: (val) => setState(() => _e2eEnabled = val),
+                        onChanged: (val) async {
+                          setState(() => _e2eEnabled = val);
+                          if (val && _passwordController.text.isEmpty) {
+                            try {
+                              final wordListStr = await DefaultAssetBundle.of(
+                                context,
+                              ).loadString('assets/eff_large_wordlist.txt');
+                              final lines = wordListStr.split('\n');
+                              final words = <String>[];
+                              for (var line in lines) {
+                                final parts = line.split('\t');
+                                if (parts.length >= 2) {
+                                  words.add(parts[1].trim());
+                                }
+                              }
+                              if (words.isNotEmpty) {
+                                final random = Random.secure();
+                                final wordCount = 7 + random.nextInt(3);
+                                final selectedWords = <String>[];
+                                for (var i = 0; i < wordCount; i++) {
+                                  selectedWords.add(
+                                    words[random.nextInt(words.length)],
+                                  );
+                                }
+                                final key = selectedWords.join('-');
+                                _passwordController.text = key;
+                                setState(() {
+                                  _obscurePassword = false;
+                                });
+                              }
+                            } catch (e) {}
+                          }
+                        },
                       ),
                       if (_e2eEnabled) ...[
                         const SizedBox(height: 16),
-                        TextField(
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          style: TextStyle(color: colorScheme.onSurface),
-                          decoration: InputDecoration(
-                            labelText: 'Encryption Password',
-                            labelStyle: TextStyle(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscurePassword
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: colorScheme.outlineVariant.withValues(
+                                alpha: 0.5,
                               ),
-                              onPressed: () {
-                                setState(() {
-                                  _obscurePassword = !_obscurePassword;
-                                });
-                              },
                             ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Recovery Passphrase',
+                                    style: GoogleFonts.gabarito(
+                                      fontWeight: FontWeight.bold,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: Icon(
+                                          _obscurePassword
+                                              ? Icons.visibility_outlined
+                                              : Icons.visibility_off_outlined,
+                                          size: 20,
+                                        ),
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: () {
+                                          setState(
+                                            () => _obscurePassword =
+                                                !_obscurePassword,
+                                          );
+                                        },
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.copy_rounded,
+                                          size: 20,
+                                        ),
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: () {
+                                          Clipboard.setData(
+                                            ClipboardData(
+                                              text: _passwordController.text,
+                                            ),
+                                          );
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Passphrase copied!',
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              if (_obscurePassword)
+                                Text(
+                                  '••••••••••••••••••••••••••••••••',
+                                  style: TextStyle(
+                                    fontSize: 24,
+                                    letterSpacing: 4,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                )
+                              else
+                                SelectableText(
+                                  _passwordController.text,
+                                  style: TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 18,
+                                    height: 1.5,
+                                    color: colorScheme.onSurface,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: () async {
+                              try {
+                                final wordListStr = await DefaultAssetBundle.of(
+                                  context,
+                                ).loadString('assets/eff_large_wordlist.txt');
+                                final lines = wordListStr.split('\n');
+                                final words = <String>[];
+                                for (var line in lines) {
+                                  final parts = line.split('\t');
+                                  if (parts.length >= 2) {
+                                    words.add(parts[1].trim());
+                                  }
+                                }
+
+                                if (words.isNotEmpty) {
+                                  final random = Random.secure();
+                                  final wordCount = 7 + random.nextInt(3);
+                                  final selectedWords = <String>[];
+                                  for (var i = 0; i < wordCount; i++) {
+                                    selectedWords.add(
+                                      words[random.nextInt(words.length)],
+                                    );
+                                  }
+
+                                  final key = selectedWords.join('-');
+                                  _passwordController.text = key;
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Failed to generate: $e'),
+                                    ),
+                                  );
+                                }
+                              }
+
+                              setState(() {
+                                _obscurePassword = false;
+                              });
+                            },
+                            icon: const Icon(Icons.refresh_rounded),
+                            label: const Text('Generate Another One'),
                           ),
                         ),
                         const SizedBox(height: 16),
                         _buildWarningItem(
                           context,
-                          'If you lose this password, your memories are gone forever.',
+                          'If you lose this password, your memories are gone forever and no one, not even AurAchieve, can recover your data.',
                           isError: true,
                         ),
                         _buildWarningItem(
                           context,
-                          'No one, not even AurAchieve, can recover your data.',
-                          isError: true,
-                        ),
-                        _buildWarningItem(
-                          context,
-                          'Media upload size limits will be smaller.',
+                          'Memories will be encrypted on your device before being saved to our servers. Media upload size limits may be smaller.',
                         ),
                       ],
                     ],
@@ -1585,11 +1879,89 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
           onPressed: _isSettingUp
               ? null
               : () async {
-                  if (_e2eEnabled && _passwordController.text.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Please set a password.')),
-                    );
-                    return;
+                  if (_e2eEnabled) {
+                    if (_passwordController.text.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please set a password.')),
+                      );
+                      return;
+                    }
+                    if (_passwordController.text.length < 12) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Encryption key must be at least 12 characters.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+
+                    bool confirmed = false;
+                    await showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (ctx) {
+                        int countdown = 5;
+                        Timer? t;
+                        return StatefulBuilder(
+                          builder: (context, setStateDialog) {
+                            t ??= Timer.periodic(const Duration(seconds: 1), (
+                              timer,
+                            ) {
+                              if (countdown > 0) {
+                                setStateDialog(() => countdown--);
+                              } else {
+                                timer.cancel();
+                              }
+                            });
+                            return AlertDialog(
+                              title: Text(
+                                'Save Your Passphrase',
+                                style: GoogleFonts.gabarito(
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurface,
+                                ),
+                              ),
+                              content: Text(
+                                'If you lose this passphrase, your memories are gone forever. We cannot recover your data. Have you written it down or saved it securely?',
+                                style: TextStyle(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () {
+                                    t?.cancel();
+                                    Navigator.of(context).pop();
+                                  },
+                                  child: const Text('Cancel'),
+                                ),
+                                FilledButton(
+                                  onPressed: countdown > 0
+                                      ? null
+                                      : () {
+                                          t?.cancel();
+                                          Navigator.of(context).pop(true);
+                                        },
+                                  child: Text(
+                                    countdown > 0
+                                        ? 'Wait ${countdown}s'
+                                        : 'I Have Saved It',
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+                      },
+                    ).then((value) => confirmed = value == true);
+
+                    if (!confirmed) return;
                   }
 
                   setState(() => _isSettingUp = true);

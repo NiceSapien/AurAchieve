@@ -1,6 +1,6 @@
 name: auraascend
 description: "Fix your damn life with AurAchieve."
-publish_to: 'none'
+publish_to: "none"
 version: 0.1.13+8
 
 environment:
@@ -51,6 +51,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-  - assets/img/
-  - assets/icon/
-  - assets/anim/
+    - assets/eff_large_wordlist.txt
+    - assets/img/
+    - assets/icon/
+    - assets/anim/

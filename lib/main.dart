@@ -586,8 +586,8 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
         return;
       }
     } catch (e) {
-      // Ignored, might be a network issue but let them through or throw error.
-      // Usually getting the account works if JWT succeeded.
+      
+      
     }
 
     if (mounted) {
@@ -615,6 +615,13 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
         email: emailController.text.trim(),
         password: passwordController.text,
       );
+      
+      try {
+        await widget.account.createEmailVerification(url: 'https://aurachieve.com/verify');
+      } catch (e) {
+        
+      }
+
       final jwt = await widget.account.createJWT();
       await _storage.write(key: 'jwt_token', value: jwt.jwt);
       TextInput.finishAutofillContext();
@@ -1450,10 +1457,11 @@ Future<void> showEmailVerificationFlow(
                             canResend = false;
                           });
                           Future.delayed(const Duration(seconds: 30), () {
-                            if (context.mounted)
+                            if (context.mounted) {
                               setState(() {
                                 canResend = true;
                               });
+                            }
                           });
                         }
                       } catch (e) {
@@ -1544,10 +1552,11 @@ Future<void> showEmailVerificationFlow(
                         checking = false;
                       });
                       Future.delayed(const Duration(seconds: 30), () {
-                        if (context.mounted)
+                        if (context.mounted) {
                           setState(() {
                             canResend = true;
                           });
+                        }
                       });
                     }
                   } catch (e) {

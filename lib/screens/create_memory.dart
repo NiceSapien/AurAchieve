@@ -200,9 +200,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
       return;
     }
 
-    if (_currentDraftId == null) {
-      _currentDraftId = const Uuid().v4();
-    }
+    _currentDraftId ??= const Uuid().v4();
 
     final draft = DraftMemory(
       id: _currentDraftId!,

@@ -21,8 +21,6 @@ import 'study_planner.dart';
 import 'screens/extended_task_list.dart';
 import 'habits.dart';
 import 'widgets/habit_details_sheet.dart';
-import 'shop.dart';
-import 'settings.dart';
 import 'profile.dart';
 import 'memorylanes.dart';
 
@@ -148,6 +146,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   final bool _showAllTasks = false;
   final bool _showAllStudyTasks = false;
+
+  bool _emailVerified = true;
   bool _showQuote = true;
 
   List<DateTime?> auraDatesForView = [];
@@ -178,6 +178,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String? _quoteText;
   String? _quoteAuthor;
   String? _memoryLanesE2E;
+
+  bool _isCheckingVerification = false;
+  bool _isSendingVerification = false;
+  int _verificationResendCooldown = 0;
+  Timer? _verificationCooldownTimer;
 
   @override
   void initState() {
@@ -283,6 +288,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _verificationCooldownTimer?.cancel();
     _bounceController.dispose();
     _holdController?.dispose();
     _auraChipTimer?.cancel();
@@ -322,7 +328,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     try {
       final models.User user = await widget.account.get();
       if (mounted) {
-        setState(() => userName = user.name.isNotEmpty ? user.name : "User");
+        setState(() {
+          userName = user.name.isNotEmpty ? user.name : "User";
+          _emailVerified = user.emailVerification;
+        });
       }
     } catch (e) {
       if (mounted) setState(() => userName = "User");
@@ -1704,6 +1713,167 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildEmailVerificationBanner() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(left: 18, right: 18, top: 16, bottom: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.primary,
+          width: 2.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.mark_email_unread_rounded,
+                color: Theme.of(context).colorScheme.onPrimaryContainer,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Verify your email to use the app.',
+                  style: GoogleFonts.gabarito(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(
+                    context,
+                  ).colorScheme.onPrimaryContainer,
+                ),
+                onPressed: _verificationResendCooldown > 0 || _isSendingVerification
+                    ? null
+                    : () async {
+                        setState(() => _isSendingVerification = true);
+                        try {
+                          await widget.account.createEmailVerification(
+                            url: 'https://aurachieve.com/verify',
+                          );
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Verification email sent'),
+                              ),
+                            );
+                            setState(() {
+                              _verificationResendCooldown = 30;
+                            });
+                            _verificationCooldownTimer?.cancel();
+                            _verificationCooldownTimer = Timer.periodic(
+                              const Duration(seconds: 1),
+                              (timer) {
+                                if (mounted) {
+                                  setState(() {
+                                    if (_verificationResendCooldown > 0) {
+                                      _verificationResendCooldown--;
+                                    } else {
+                                      timer.cancel();
+                                    }
+                                  });
+                                }
+                              },
+                            );
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(
+                              context,
+                            ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                          }
+                        } finally {
+                          if (mounted) setState(() => _isSendingVerification = false);
+                        }
+                      },
+                child: _isSendingVerification
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      )
+                    : Text(_verificationResendCooldown > 0
+                        ? 'Resend ($_verificationResendCooldown)'
+                        : 'Resend'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.onPrimaryContainer,
+                  foregroundColor: Theme.of(context).colorScheme.primaryContainer,
+                ),
+                onPressed: _isCheckingVerification
+                    ? null
+                    : () async {
+                        setState(() => _isCheckingVerification = true);
+                        try {
+                          final user = await widget.account.get();
+                          if (context.mounted) {
+                            setState(() {
+                              _emailVerified = user.emailVerification;
+                            });
+                            if (_emailVerified) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Email verified successfully!'),
+                                ),
+                              );
+                              _fetchDataFromServer();
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Email is still not verified'),
+                                ),
+                              );
+                            }
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error: $e')),
+                            );
+                          }
+                        } finally {
+                          if (mounted) setState(() => _isCheckingVerification = false);
+                        }
+                      },
+                child: _isCheckingVerification
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Text('Verified'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDashboardView() {
     if (isLoading) {
       return const _LoadingView();
@@ -1711,8 +1881,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     final pendingTasks = tasks.where((t) => t.status == 'pending').toList();
 
+    Widget activeView;
     if (_taskLoadError != null) {
-      return Center(
+      activeView = Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -1723,7 +1894,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
             const SizedBox(height: 16),
             Text(
-              'Failed to load tasks.',
+              !_emailVerified || _taskLoadError!.contains('Email not verified') || _taskLoadError!.contains('unauthorized')
+                  ? 'Failed to load tasks. Please verify your email first.'
+                  : 'Failed to load tasks.',
               style: GoogleFonts.gabarito(
                 fontSize: 18,
                 color: Theme.of(context).colorScheme.error,
@@ -1738,211 +1911,222 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ],
         ),
       );
-    }
+    } else {
+      activeView = LayoutBuilder(
+        builder: (context, constraints) {
+          final double screenWidth = constraints.maxWidth;
+          final int crossAxisCount = screenWidth > 600 ? 4 : 2;
+          final hasHabits = _preloadedHabits.isNotEmpty;
+          final scheme = Theme.of(context).colorScheme;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double screenWidth = constraints.maxWidth;
-        final int crossAxisCount = screenWidth > 600 ? 4 : 2;
-        final hasHabits = _preloadedHabits.isNotEmpty;
-        final scheme = Theme.of(context).colorScheme;
+          if (pendingTasks.isEmpty && !hasHabits) {
+            return _buildEmptyTasksView();
+          }
 
-        if (pendingTasks.isEmpty && !hasHabits) {
-          return _buildEmptyTasksView();
-        }
-
-        return ListView(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 18.0,
-          ).copyWith(bottom: 80),
-          children: [
-            if (pendingTasks.isEmpty)
-              SizedBox(
-                height: constraints.maxHeight * 0.5,
-                child: _buildEmptyTasksView(),
-              )
-            else ...[
-              const SizedBox(height: 4),
-              if (_showQuote)
-                Stack(
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.only(top: 16, bottom: 12),
-                      padding: const EdgeInsets.only(
-                        left: 12,
-                        right: 12,
-                        top: 20,
-                        bottom: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.secondaryContainer,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Theme.of(context).colorScheme.outlineVariant,
-                          width: 1.5,
+          return ListView(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 18.0,
+            ).copyWith(bottom: 80),
+            children: [
+              if (pendingTasks.isEmpty)
+                SizedBox(
+                  height: constraints.maxHeight * 0.5,
+                  child: _buildEmptyTasksView(),
+                )
+              else ...[
+                const SizedBox(height: 4),
+                if (_showQuote)
+                  Stack(
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(top: 16, bottom: 12),
+                        padding: const EdgeInsets.only(
+                          left: 12,
+                          right: 12,
+                          top: 20,
+                          bottom: 8,
                         ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Text(
-                            _quoteText?.isNotEmpty == true
-                                ? _quoteText!
-                                : 'Make them realise that they lost a diamond while playing with worthless stones',
-                            style: GoogleFonts.gabarito(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSecondaryContainer,
-                              fontStyle: FontStyle.italic,
-                            ),
-                            textAlign: TextAlign.center,
+                        decoration: BoxDecoration(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outlineVariant,
+                            width: 1.5,
                           ),
-                          const SizedBox(height: 8),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: Text(
-                              _quoteAuthor?.isNotEmpty == true
-                                  ? '- ${_quoteAuthor!}'
-                                  : '- Captain Underpants',
-                              style: GoogleFonts.ebGaramond(
-                                fontSize: 14,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Text(
+                              _quoteText?.isNotEmpty == true
+                                  ? _quoteText!
+                                  : 'Make them realise that they lost a diamond while playing with worthless stones',
+                              style: GoogleFonts.gabarito(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
                                 color: Theme.of(
                                   context,
                                 ).colorScheme.onSecondaryContainer,
+                                fontStyle: FontStyle.italic,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                _quoteAuthor?.isNotEmpty == true
+                                    ? '- ${_quoteAuthor!}'
+                                    : '- Captain Underpants',
+                                style: GoogleFonts.ebGaramond(
+                                  fontSize: 14,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSecondaryContainer,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
+                      ),
+                      Positioned(
+                        top: 6,
+                        right: 0,
+                        child: IconButton(
+                          onPressed: () {
+                            setState(() {
+                              _showQuote = false;
+                            });
+                          },
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                        ),
+                      ),
+                    ],
+                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Material(
+                      type: MaterialType.transparency,
+                      child: Text(
+                        'Your Tasks',
+                        style: GoogleFonts.gabarito(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
                       ),
                     ),
-                    Positioned(
-                      top: 6,
-                      right: 0,
-                      child: IconButton(
+                    if (pendingTasks.length > 4)
+                      IconButton(
+                        icon: const Icon(Icons.arrow_forward_rounded),
                         onPressed: () {
-                          setState(() {
-                            _showQuote = false;
-                          });
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) => AllTasksScreen(
+                                tasks: tasks,
+                                allPendingTasks: pendingTasks,
+                                onCompleteTask: _completeTask,
+                                onDeleteTask: _deleteTask,
+                                buildTaskIcon: _buildTaskIcon,
+                                buildTaskSubtitle: _buildCompactSubtitle,
+                                apiService: _apiService,
+                                onTaskCompleted: _fetchDataFromServer,
+                              ),
+                            ),
+                          );
                         },
-                        icon: const Icon(Icons.close_rounded, size: 20),
                       ),
-                    ),
                   ],
                 ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Material(
-                    type: MaterialType.transparency,
-                    child: Text(
-                      'Your Tasks',
+                const SizedBox(height: 8),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 1.0,
+                  ),
+                  itemCount: pendingTasks.length > 4 ? 4 : pendingTasks.length,
+                  itemBuilder: (context, index) {
+                    final task = pendingTasks[index];
+                    final originalTaskIndex = tasks.indexOf(task);
+                    return _buildTaskCard(task, originalTaskIndex);
+                  },
+                ),
+              ],
+              if (hasHabits) ...[
+                const SizedBox(height: 24.0),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "Habits",
                       style: GoogleFonts.gabarito(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                         color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
-                  ),
-                  if (pendingTasks.length > 4)
+
                     IconButton(
                       icon: const Icon(Icons.arrow_forward_rounded),
                       onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => AllTasksScreen(
-                              tasks: tasks,
-                              allPendingTasks: pendingTasks,
-                              onCompleteTask: _completeTask,
-                              onDeleteTask: _deleteTask,
-                              buildTaskIcon: _buildTaskIcon,
-                              buildTaskSubtitle: _buildCompactSubtitle,
-                              apiService: _apiService,
-                              onTaskCompleted: _fetchDataFromServer,
+                        final keys = _currentTabKeys();
+                        final idx = keys.indexOf('habits');
+                        if (idx != -1) {
+                          setState(() => _selectedIndex = idx);
+                        } else {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => HabitsPage(
+                                apiService: _apiService,
+                                userName: userName,
+                                initialHabits: _preloadedHabits,
+                                currentAura: _aura,
+                                onAuraChange: (newAura) {
+                                  setState(() => _aura = newAura);
+                                },
+                              ),
                             ),
-                          ),
-                        );
+                          );
+                        }
                       },
                     ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 1.0,
+                  ],
                 ),
-                itemCount: pendingTasks.length > 4 ? 4 : pendingTasks.length,
-                itemBuilder: (context, index) {
-                  final task = pendingTasks[index];
-                  final originalTaskIndex = tasks.indexOf(task);
-                  return _buildTaskCard(task, originalTaskIndex);
-                },
-              ),
+                ..._preloadedHabits
+                    .where((h) => h['type'] != 'bad')
+                    .take(2)
+                    .map((h) {
+                      final m = (h is Map<String, dynamic>)
+                          ? h
+                          : Map<String, dynamic>.from(h as Map);
+                      m['completedTimes'] = m['completedTimes'] ?? 0;
+                      m['completedDays'] = _normalizeCompletedDays(
+                        m['completedDays'],
+                      );
+                      final index = _preloadedHabits.indexOf(h);
+                      return _buildHabitCardForHome(m, index, scheme);
+                    }),
+              ],
             ],
-            if (hasHabits) ...[
-              const SizedBox(height: 24.0),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "Habits",
-                    style: GoogleFonts.gabarito(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
+          );
+        },
+      );
+    }
 
-                  IconButton(
-                    icon: const Icon(Icons.arrow_forward_rounded),
-                    onPressed: () {
-                      final keys = _currentTabKeys();
-                      final idx = keys.indexOf('habits');
-                      if (idx != -1) {
-                        setState(() => _selectedIndex = idx);
-                      } else {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => HabitsPage(
-                              apiService: _apiService,
-                              userName: userName,
-                              initialHabits: _preloadedHabits,
-                              currentAura: _aura,
-                              onAuraChange: (newAura) {
-                                setState(() => _aura = newAura);
-                              },
-                            ),
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                ],
-              ),
-              ..._preloadedHabits.where((h) => h['type'] != 'bad').take(2).map((
-                h,
-              ) {
-                final m = (h is Map<String, dynamic>)
-                    ? h
-                    : Map<String, dynamic>.from(h as Map);
-                m['completedTimes'] = m['completedTimes'] ?? 0;
-                m['completedDays'] = _normalizeCompletedDays(
-                  m['completedDays'],
-                );
-                final index = _preloadedHabits.indexOf(h);
-                return _buildHabitCardForHome(m, index, scheme);
-              }),
-            ],
-          ],
-        );
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!_emailVerified) _buildEmailVerificationBanner(),
+        Expanded(child: activeView),
+      ],
     );
   }
 
