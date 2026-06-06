@@ -577,7 +577,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
     setState(() => isBusy = true);
     try {
       final user = await widget.account.get();
-      
+
       if (!user.emailVerification) {
         if (mounted) {
           setState(() => isBusy = false);
@@ -585,10 +585,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
         }
         return;
       }
-    } catch (e) {
-      
-      
-    }
+    } catch (e) {}
 
     if (mounted) {
       setState(() => isBusy = false);
@@ -615,21 +612,19 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
         email: emailController.text.trim(),
         password: passwordController.text,
       );
-      
+
       try {
-        await widget.account.createEmailVerification(url: 'https://aurachieve.com/verify');
-      } catch (e) {
-        
-      }
+        await widget.account.createEmailVerification(
+          url: 'https://aurachieve.com/verify',
+        );
+      } catch (e) {}
 
       final jwt = await widget.account.createJWT();
       await _storage.write(key: 'jwt_token', value: jwt.jwt);
       TextInput.finishAutofillContext();
       await _handleSuccessfulAuth();
     } catch (e) {
-      showError(
-        'Registration failed: ${e.toString().replaceAll('AppwriteException: ', '')}',
-      );
+      showError('Registration failed: ${getFriendlyErrorMessage(e)}');
     }
     if (mounted) {
       setState(() => isBusy = false);
@@ -648,9 +643,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
       await _storage.write(key: 'jwt_token', value: jwt.jwt);
       await _handleSuccessfulAuth();
     } catch (e) {
-      showError(
-        'Login failed: ${e.toString().replaceAll('AppwriteException: ', '')}',
-      );
+      showError('Login failed: ${getFriendlyErrorMessage(e)}');
     }
     if (mounted) {
       setState(() => isBusy = false);
@@ -670,9 +663,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
     } catch (e) {
       if (!e.toString().contains('canceled') &&
           !e.toString().contains('Canceled')) {
-        showError(
-          'Google Sign-In failed: ${e.toString().replaceAll('AppwriteException: ', '')}',
-        );
+        showError('Google Sign-In failed: ${getFriendlyErrorMessage(e)}');
       }
     }
     if (mounted) {
@@ -752,7 +743,7 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                 }
               } catch (e) {
                 setStateDialog(() {
-                  errorText = 'Failed to send link. Wrong email, probably.';
+                  errorText = getFriendlyErrorMessage(e);
                   isSending = false;
                 });
               }
@@ -1409,9 +1400,11 @@ Future<void> showEmailVerificationFlow(
                 .catchError((e) {
                   if (context.mounted) {
                     Navigator.pop(context);
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Error: ${getFriendlyErrorMessage(e)}'),
+                      ),
+                    );
                   }
                 });
             return AlertDialog(
@@ -1469,9 +1462,13 @@ Future<void> showEmailVerificationFlow(
                           setState(() {
                             checking = false;
                           });
-                          ScaffoldMessenger.of(
-                            context,
-                          ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Error: ${getFriendlyErrorMessage(e)}',
+                              ),
+                            ),
+                          );
                         }
                       }
                     },
@@ -1508,9 +1505,13 @@ Future<void> showEmailVerificationFlow(
                         setState(() {
                           checking = false;
                         });
-                        ScaffoldMessenger.of(
-                          context,
-                        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Error: ${getFriendlyErrorMessage(e)}',
+                            ),
+                          ),
+                        );
                       }
                     }
                   },
@@ -1564,9 +1565,11 @@ Future<void> showEmailVerificationFlow(
                       setState(() {
                         checking = false;
                       });
-                      ScaffoldMessenger.of(
-                        context,
-                      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Error: ${getFriendlyErrorMessage(e)}'),
+                        ),
+                      );
                     }
                   }
                 },
@@ -1579,4 +1582,80 @@ Future<void> showEmailVerificationFlow(
     },
   );
   isVerificationDialogOpen = false;
+}
+
+String getFriendlyErrorMessage(dynamic e) {
+  if (e is appwrite.AppwriteException) {
+    // 1. Check specific error types first
+    switch (e.type) {
+      case 'user_invalid_credentials':
+        return 'Incorrect email or password. Please check your credentials and try again.';
+      case 'user_already_exists':
+      case 'user_email_already_exists':
+        return 'An account with this email address already exists. Try logging in instead.';
+      case 'user_blocked':
+        return 'This account has been blocked. Please contact support.';
+      case 'user_not_found':
+        return 'No account was found with this email address.';
+      case 'user_unauthorized':
+        return 'You are not authorized to perform this action. Please log in again.';
+      case 'user_invalid_token':
+        return 'Your session has expired or the token is invalid. Please log in again.';
+
+      // Password policy errors
+      case 'password_too_short':
+        return 'Your password is too short. It must be at least 8 characters long.';
+      case 'password_recently_used':
+        return 'For security, you cannot reuse a recently used password.';
+      case 'password_personal_data':
+        return 'Your password is too weak. For security, do not use your name, email, or username in your password.';
+
+      // General errors
+      case 'general_rate_limit_exceeded':
+        return 'Too many attempts. Please wait a few minutes before trying again.';
+    }
+
+    // 2. Map standard HTTP status codes
+    if (e.code == 401) {
+      return 'Incorrect email or password. Please check your credentials and try again.';
+    } else if (e.code == 400) {
+      final msg = e.message ?? '';
+      if (msg.toLowerCase().contains('email')) {
+        return 'Please enter a valid email address.';
+      }
+      if (msg.toLowerCase().contains('password')) {
+        return 'Please enter a valid password (must be at least 8 characters long).';
+      }
+      if (msg.toLowerCase().contains('name')) {
+        return 'Please enter a valid name.';
+      }
+      if (msg.isNotEmpty) {
+        return msg.replaceAll('AppwriteException: ', '');
+      }
+      return 'Invalid input details. Please check your inputs and try again.';
+    } else if (e.code == 403) {
+      return 'Access denied. You do not have permission to perform this action.';
+    } else if (e.code == 409) {
+      return 'An account with this email address already exists. Try logging in instead.';
+    } else if (e.code == 500 || e.code == 503) {
+      return 'Server error. Please try again later.';
+    }
+
+    // 3. Fallback to raw message if available
+    if (e.message != null && e.message!.isNotEmpty) {
+      return e.message!.replaceAll('AppwriteException: ', '');
+    }
+    return 'An error occurred (Code: ${e.code}). Please try again.';
+  }
+
+  final errorStr = e.toString();
+  if (errorStr.contains('NetworkImage') ||
+      errorStr.contains('SocketException') ||
+      errorStr.contains('Failed host lookup')) {
+    return 'Network connection error. Please check your internet connection and try again.';
+  }
+
+  return errorStr
+      .replaceAll('Exception: ', '')
+      .replaceAll('AppwriteException: ', '');
 }

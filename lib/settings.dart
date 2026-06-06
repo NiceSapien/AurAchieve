@@ -37,6 +37,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _immersiveMode = true;
   bool _soundVibration = true;
   bool _saveDrafts = true;
+  bool _soundtrackSeeking = true;
+  bool _compactView = false;
 
   bool _dynamicColor = true;
   String _themeMode = 'auto';
@@ -59,6 +61,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         setState(() {
           _saveDrafts = prefs.getBool('save_drafts') ?? true;
+          _soundtrackSeeking = prefs.getBool('soundtrack_seeking') ?? true;
+          _compactView = prefs.getBool('compact_memories_list') ?? false;
         });
       }
     } catch (_) {}
@@ -139,6 +143,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setBool('save_drafts', value);
     setState(() {
       _saveDrafts = value;
+    });
+  }
+
+  Future<void> _toggleSoundtrackSeekingSetting(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('soundtrack_seeking', value);
+    setState(() {
+      _soundtrackSeeking = value;
+    });
+  }
+
+  Future<void> _toggleCompactViewSetting(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('compact_memories_list', value);
+    setState(() {
+      _compactView = value;
     });
   }
 
@@ -337,6 +357,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: const Text('Keep unsaved memories for 14 days'),
                   value: _saveDrafts,
                   onChanged: (v) => _toggleDraftSetting(v),
+                ),
+                Divider(
+                  height: 1,
+                  thickness: 0.5,
+                  indent: 16,
+                  endIndent: 16,
+                  color: cs.outlineVariant.withValues(alpha: 0.5),
+                ),
+                SwitchListTile.adaptive(
+                  contentPadding: tilePadding,
+                  title: const Text('Soundtrack Seeking'),
+                  subtitle: const Text('Allow scrubbing through soundtracks'),
+                  value: _soundtrackSeeking,
+                  onChanged: (v) => _toggleSoundtrackSeekingSetting(v),
+                ),
+                Divider(
+                  height: 1,
+                  thickness: 0.5,
+                  indent: 16,
+                  endIndent: 16,
+                  color: cs.outlineVariant.withValues(alpha: 0.5),
+                ),
+                SwitchListTile.adaptive(
+                  contentPadding: tilePadding,
+                  title: const Text('Compact Timeline View'),
+                  subtitle: const Text(
+                    'Hide description previews on memory cards',
+                  ),
+                  value: _compactView,
+                  onChanged: (v) => _toggleCompactViewSetting(v),
                 ),
               ],
             ),

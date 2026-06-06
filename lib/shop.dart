@@ -22,6 +22,7 @@ class _ShopPageState extends State<ShopPage> {
   List<String> _purchasedThemes = [];
   String? _currentTheme;
   bool _isLoading = true;
+  bool _isPurchasing = false;
 
   @override
   void initState() {
@@ -50,13 +51,16 @@ class _ShopPageState extends State<ShopPage> {
     final isOwned = _purchasedThemes.contains(themeKey);
     final isEquipped = _currentTheme == themeKey;
 
-    if (isEquipped) return;
+    if (isEquipped || _isPurchasing) return;
 
     if (isOwned) {
+      setState(() => _isPurchasing = true);
       try {
         await widget.apiService.updateAuraTheme(themeKey);
         if (mounted) {
-          setState(() => _currentTheme = themeKey);
+          setState(() {
+            _currentTheme = themeKey;
+          });
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('Theme equipped!')));
@@ -67,6 +71,10 @@ class _ShopPageState extends State<ShopPage> {
             context,
           ).showSnackBar(SnackBar(content: Text('Failed to equip theme: $e')));
         }
+      } finally {
+        if (mounted) {
+          setState(() => _isPurchasing = false);
+        }
       }
     } else {
       if (widget.currentAura < cost) {
@@ -76,6 +84,7 @@ class _ShopPageState extends State<ShopPage> {
         return;
       }
 
+      setState(() => _isPurchasing = true);
       try {
         final result = await widget.apiService.updateAuraTheme(themeKey);
         if (mounted) {
@@ -96,6 +105,10 @@ class _ShopPageState extends State<ShopPage> {
             SnackBar(content: Text('Failed to purchase theme: $e')),
           );
         }
+      } finally {
+        if (mounted) {
+          setState(() => _isPurchasing = false);
+        }
       }
     }
   }
@@ -115,6 +128,15 @@ class _ShopPageState extends State<ShopPage> {
           style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
+        bottom: _isPurchasing
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(4),
+                child: LinearProgressIndicator(
+                  backgroundColor: scheme.surfaceContainerHigh,
+                  color: scheme.primary,
+                ),
+              )
+            : null,
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 16),
@@ -295,7 +317,7 @@ class _ShopPageState extends State<ShopPage> {
         borderRadius: BorderRadius.circular(24),
         child: InkWell(
           borderRadius: BorderRadius.circular(24),
-          onTap: canInteract ? onTap : null,
+          onTap: (canInteract && !_isPurchasing) ? onTap : null,
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Row(

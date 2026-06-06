@@ -17,6 +17,7 @@ import 'package:emoji_picker_flutter/emoji_picker_flutter.dart' as emoji_picker;
 import 'package:uuid/uuid.dart';
 import '../api_service.dart';
 import '../utils/draft_utils.dart';
+import 'package:http/http.dart' as http;
 
 class CreateMemoryPage extends StatefulWidget {
   final ApiService apiService;
@@ -72,6 +73,12 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
   int? _playingIndex;
+  Map<String, dynamic>? _selectedSong;
+  Duration _musicDuration = Duration.zero;
+  Duration _musicPosition = Duration.zero;
+  bool _isPlayingMusic = false;
+  String? _playingMusicUrl;
+  bool _soundtrackSeeking = true;
 
   final List<Map<String, dynamic>> _colors = [
     {'name': 'blue', 'color': Colors.blue},
@@ -86,11 +93,37 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   @override
   void initState() {
     super.initState();
+    _loadSeekingSetting();
     _loadRecentMoods();
     _quillController = quill.QuillController.basic();
+    _audioPlayer.onDurationChanged.listen((d) {
+      if (mounted) {
+        setState(() {
+          _musicDuration = d;
+        });
+      }
+    });
+    _audioPlayer.onPositionChanged.listen((p) {
+      if (mounted) {
+        setState(() {
+          _musicPosition = p;
+        });
+      }
+    });
+    _audioPlayer.onPlayerStateChanged.listen((state) {
+      if (mounted) {
+        setState(() {
+          _isPlayingMusic = state == PlayerState.playing;
+        });
+      }
+    });
     _audioPlayer.onPlayerComplete.listen((_) {
       if (mounted) {
-        setState(() => _playingIndex = null);
+        setState(() {
+          _playingIndex = null;
+          _isPlayingMusic = false;
+          _musicPosition = Duration.zero;
+        });
       }
     });
 
@@ -111,7 +144,15 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
           _selectedDate = DateTime.parse(widget.existingMemory!['createdAt']);
         } catch (_) {}
       }
-      final desc = widget.existingMemory!['description'] ?? '';
+      String desc = widget.existingMemory!['description'] ?? '';
+      if (desc.contains('%%LISTENED_TO:')) {
+        final parts = desc.split('%%LISTENED_TO:');
+        desc = parts[0].trim();
+        final songPart = parts[1].replaceAll('%%', '').trim();
+        try {
+          _selectedSong = jsonDecode(songPart);
+        } catch (_) {}
+      }
       try {
         final json = jsonDecode(desc);
         _quillController = quill.QuillController(
@@ -141,6 +182,17 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
     });
   }
 
+  Future<void> _loadSeekingSetting() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (mounted) {
+        setState(() {
+          _soundtrackSeeking = prefs.getBool('soundtrack_seeking') ?? true;
+        });
+      }
+    } catch (_) {}
+  }
+
   void _onContentChanged() {
     if (!_hasUnsavedChanges) {
       _hasUnsavedChanges = true;
@@ -155,9 +207,18 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
       _tagController.text = draft.tag ?? '';
       _selectedColor = draft.tagColor ?? 'blue';
       _selectedMood = draft.mood;
-      if (draft.description.isNotEmpty) {
+      String desc = draft.description;
+      if (desc.contains('%%LISTENED_TO:')) {
+        final parts = desc.split('%%LISTENED_TO:');
+        desc = parts[0].trim();
+        final songPart = parts[1].replaceAll('%%', '').trim();
         try {
-          final delta = jsonDecode(draft.description);
+          _selectedSong = jsonDecode(songPart);
+        } catch (_) {}
+      }
+      if (desc.isNotEmpty) {
+        try {
+          final delta = jsonDecode(desc);
           final doc = quill.Document.fromJson(delta);
 
           final oldController = _quillController;
@@ -202,13 +263,18 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
 
     _currentDraftId ??= const Uuid().v4();
 
+    String descStr = jsonEncode(_quillController.document.toDelta().toJson());
+    if (_selectedSong != null) {
+      descStr += '\n\n%%LISTENED_TO:${jsonEncode(_selectedSong)}%%';
+    }
+
     final draft = DraftMemory(
       id: _currentDraftId!,
       title: _titleController.text,
       tag: _tagController.text,
       tagColor: _selectedColor,
       mood: _selectedMood,
-      description: jsonEncode(_quillController.document.toDelta().toJson()),
+      description: descStr,
       timestamp: DateTime.now().millisecondsSinceEpoch,
       mediaPaths: _mediaFiles.map((f) => f.path).toList(),
       mediaTypes: _mediaTypes,
@@ -373,6 +439,9 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
 
       final delta = _quillController.document.toDelta();
       String description = jsonEncode(delta.toJson());
+      if (_selectedSong != null) {
+        description += '\n\n%%LISTENED_TO:${jsonEncode(_selectedSong)}%%';
+      }
 
       String? name = _titleController.text.trim();
       String? tag = _tagController.text.trim().isNotEmpty
@@ -487,6 +556,306 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showMusicSearchBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => MusicSearchBottomSheet(
+        onSongSelected: (song) {
+          setState(() {
+            _selectedSong = {
+              'trackName': song['trackName'],
+              'artistName': song['artistName'],
+              'artworkUrl100': song['artworkUrl100'],
+              'previewUrl': song['previewUrl'],
+              'trackViewUrl': song['trackViewUrl'],
+            };
+          });
+        },
+      ),
+    );
+  }
+
+  final Map<String, String> _resolvedUrls = {};
+
+  Future<void> _togglePlaySelectedMusic(
+    String previewUrl,
+    String? trackViewUrl,
+  ) async {
+    String playUrl = previewUrl;
+    if (trackViewUrl != null && trackViewUrl.isNotEmpty) {
+      if (_resolvedUrls.containsKey(trackViewUrl)) {
+        playUrl = _resolvedUrls[trackViewUrl]!;
+      } else {
+        try {
+          final response = await http
+              .get(Uri.parse(trackViewUrl))
+              .timeout(const Duration(seconds: 3));
+          if (response.statusCode == 200) {
+            final body = response.body;
+            final regExp = RegExp(r'https://[^\s"]+?\.plus\.aac\.ep\.m4a');
+            final match = regExp.firstMatch(body);
+            if (match != null) {
+              playUrl = match.group(0)!;
+            }
+          }
+        } catch (_) {}
+        _resolvedUrls[trackViewUrl] = playUrl;
+      }
+    }
+
+    if (_playingMusicUrl == playUrl && _isPlayingMusic) {
+      await _audioPlayer.pause();
+    } else if (_playingMusicUrl == playUrl &&
+        !_isPlayingMusic &&
+        _musicPosition > Duration.zero) {
+      await _audioPlayer.resume();
+    } else {
+      await _audioPlayer.stop();
+      setState(() {
+        _playingMusicUrl = playUrl;
+        _playingIndex = null;
+      });
+      await _audioPlayer.play(UrlSource(playUrl));
+    }
+  }
+
+  void _removeSelectedMusic() {
+    setState(() {
+      _selectedSong = null;
+      _playingMusicUrl = null;
+      _isPlayingMusic = false;
+    });
+    _audioPlayer.stop();
+  }
+
+  String _formatMusicDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  Widget _buildSelectedMusicCard(ColorScheme colorScheme) {
+    if (_selectedSong == null) return const SizedBox.shrink();
+
+    final trackName = _selectedSong!['trackName'] ?? 'Unknown Track';
+    final artistName = _selectedSong!['artistName'] ?? 'Unknown Artist';
+    final artworkUrl = _selectedSong!['artworkUrl100'] ?? '';
+    final previewUrl = _selectedSong!['previewUrl'] ?? '';
+    final trackViewUrl = _selectedSong!['trackViewUrl'] ?? '';
+
+    final isCurrentPlaying =
+        _playingMusicUrl == previewUrl ||
+        (_resolvedUrls[trackViewUrl] != null &&
+            _playingMusicUrl == _resolvedUrls[trackViewUrl]);
+    final isPlaying = isCurrentPlaying && _isPlayingMusic;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 16, bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.music_note_rounded,
+                size: 14,
+                color: colorScheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'WHAT I\'VE BEEN LISTENING TO',
+                style: GoogleFonts.gabarito(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: colorScheme.primary,
+                  letterSpacing: 1.0,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: artworkUrl.isNotEmpty
+                    ? Image.network(
+                        artworkUrl,
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => Container(
+                          width: 48,
+                          height: 48,
+                          color: colorScheme.surfaceContainer,
+                          child: Icon(
+                            Icons.music_note_rounded,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      )
+                    : Container(
+                        width: 48,
+                        height: 48,
+                        color: colorScheme.surfaceContainer,
+                        child: Icon(
+                          Icons.music_note_rounded,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      trackName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.gabarito(
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onSurface,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      artistName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (previewUrl.isNotEmpty)
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: isPlaying
+                        ? colorScheme.primaryContainer
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isPlaying
+                          ? colorScheme.primary.withValues(alpha: 0.5)
+                          : colorScheme.outlineVariant,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    style: IconButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    icon: Icon(
+                      isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      size: 22,
+                      color: isPlaying
+                          ? colorScheme.onPrimaryContainer
+                          : colorScheme.onSurfaceVariant,
+                    ),
+                    onPressed: () =>
+                        _togglePlaySelectedMusic(previewUrl, trackViewUrl),
+                  ),
+                ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline_rounded, size: 22),
+                color: colorScheme.error,
+                onPressed: _removeSelectedMusic,
+              ),
+            ],
+          ),
+          if (isCurrentPlaying) ...[
+            const SizedBox(height: 8),
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 4,
+                activeTrackColor: colorScheme.primary,
+                inactiveTrackColor: colorScheme.secondaryContainer,
+                thumbColor: colorScheme.primary,
+                thumbShape: _soundtrackSeeking
+                    ? const RoundSliderThumbShape(
+                        enabledThumbRadius: 6,
+                        pressedElevation: 0,
+                      )
+                    : const RoundSliderThumbShape(
+                        enabledThumbRadius: 0,
+                        disabledThumbRadius: 0,
+                        pressedElevation: 0,
+                      ),
+                overlayColor: colorScheme.primary.withValues(alpha: 0.08),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                trackShape: const RoundedRectSliderTrackShape(),
+                showValueIndicator: ShowValueIndicator.never,
+                padding: EdgeInsets.zero,
+              ),
+              child: SizedBox(
+                height: 24,
+                child: Slider(
+                  value: _musicPosition.inMilliseconds.toDouble().clamp(
+                    0.0,
+                    _musicDuration.inMilliseconds.toDouble(),
+                  ),
+                  max: _musicDuration.inMilliseconds > 0
+                      ? _musicDuration.inMilliseconds.toDouble()
+                      : 1.0,
+                  onChanged: _soundtrackSeeking
+                      ? (val) {
+                          _audioPlayer.seek(
+                            Duration(milliseconds: val.toInt()),
+                          );
+                        }
+                      : null,
+                ),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  _formatMusicDuration(_musicPosition),
+                  style: GoogleFonts.gabarito(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                  ),
+                ),
+                Text(
+                  _formatMusicDuration(_musicDuration),
+                  style: GoogleFonts.gabarito(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -739,6 +1108,11 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
               : null,
           actions: [
             IconButton(
+              icon: const Icon(Icons.music_note_rounded),
+              tooltip: 'What have you been listening to?',
+              onPressed: _showMusicSearchBottomSheet,
+            ),
+            IconButton(
               icon: const Icon(Icons.add),
               tooltip: 'Add Media/Tag',
               onPressed: _showAddMenu,
@@ -980,136 +1354,158 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                       const SizedBox(height: 16),
                     ],
 
-                    if (_mediaFiles.isNotEmpty) ...[
+                    if (_existingFileIds.isNotEmpty ||
+                        _mediaFiles.isNotEmpty) ...[
                       SizedBox(
                         height: 120,
                         child: ListView.builder(
                           scrollDirection: Axis.horizontal,
-                          itemCount: _mediaFiles.length,
+                          itemCount:
+                              _existingFileIds.length + _mediaFiles.length,
                           itemBuilder: (context, index) {
-                            final file = _mediaFiles[index];
-                            final type = _mediaTypes[index];
-                            return Stack(
-                              children: [
-                                Container(
-                                  width: 100,
-                                  margin: const EdgeInsets.only(right: 12),
-                                  child: Column(
-                                    children: [
-                                      Container(
-                                        height: 80,
-                                        width: 100,
-                                        decoration: BoxDecoration(
-                                          color:
-                                              colorScheme.surfaceContainerHigh,
-                                          borderRadius: BorderRadius.circular(
-                                            12,
+                            if (index < _existingFileIds.length) {
+                              final fileId = _existingFileIds[index];
+                              return _ExistingMediaPreview(
+                                key: ValueKey('existing_$fileId'),
+                                fileId: fileId,
+                                apiService: widget.apiService,
+                                onDelete: () {
+                                  setState(() {
+                                    _existingFileIds.removeAt(index);
+                                    _hasUnsavedChanges = true;
+                                  });
+                                },
+                              );
+                            } else {
+                              final localIndex =
+                                  index - _existingFileIds.length;
+                              final file = _mediaFiles[localIndex];
+                              final type = _mediaTypes[localIndex];
+                              return Stack(
+                                children: [
+                                  Container(
+                                    width: 100,
+                                    margin: const EdgeInsets.only(right: 12),
+                                    child: Column(
+                                      children: [
+                                        Container(
+                                          height: 80,
+                                          width: 100,
+                                          decoration: BoxDecoration(
+                                            color: colorScheme
+                                                .surfaceContainerHigh,
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                            border: Border.all(
+                                              color: colorScheme.outlineVariant,
+                                            ),
+                                            image: type == 'image'
+                                                ? DecorationImage(
+                                                    image: FileImage(file),
+                                                    fit: BoxFit.cover,
+                                                  )
+                                                : null,
                                           ),
-                                          border: Border.all(
-                                            color: colorScheme.outlineVariant,
-                                          ),
-                                          image: type == 'image'
-                                              ? DecorationImage(
-                                                  image: FileImage(file),
-                                                  fit: BoxFit.cover,
-                                                )
-                                              : null,
-                                        ),
-                                        child: type != 'image'
-                                            ? Center(
-                                                child: type == 'audio'
-                                                    ? IconButton(
-                                                        icon: Icon(
-                                                          _playingIndex == index
-                                                              ? Icons.stop
-                                                              : Icons
-                                                                    .play_arrow,
+                                          child: type != 'image'
+                                              ? Center(
+                                                  child: type == 'audio'
+                                                      ? IconButton(
+                                                          icon: Icon(
+                                                            _playingIndex ==
+                                                                    index
+                                                                ? Icons.stop
+                                                                : Icons
+                                                                      .play_arrow,
+                                                            color: colorScheme
+                                                                .onSurface,
+                                                            size: 32,
+                                                          ),
+                                                          onPressed: () async {
+                                                            if (_playingIndex ==
+                                                                index) {
+                                                              await _audioPlayer
+                                                                  .stop();
+                                                              setState(
+                                                                () =>
+                                                                    _playingIndex =
+                                                                        null,
+                                                              );
+                                                            } else {
+                                                              await _audioPlayer
+                                                                  .stop();
+                                                              await _audioPlayer
+                                                                  .play(
+                                                                    DeviceFileSource(
+                                                                      file.path,
+                                                                    ),
+                                                                  );
+                                                              setState(
+                                                                () =>
+                                                                    _playingIndex =
+                                                                        index,
+                                                              );
+                                                            }
+                                                          },
+                                                        )
+                                                      : Icon(
+                                                          Icons.videocam,
                                                           color: colorScheme
                                                               .onSurface,
                                                           size: 32,
                                                         ),
-                                                        onPressed: () async {
-                                                          if (_playingIndex ==
-                                                              index) {
-                                                            await _audioPlayer
-                                                                .stop();
-                                                            setState(
-                                                              () =>
-                                                                  _playingIndex =
-                                                                      null,
-                                                            );
-                                                          } else {
-                                                            await _audioPlayer
-                                                                .stop();
-                                                            await _audioPlayer
-                                                                .play(
-                                                                  DeviceFileSource(
-                                                                    file.path,
-                                                                  ),
-                                                                );
-                                                            setState(
-                                                              () =>
-                                                                  _playingIndex =
-                                                                      index,
-                                                            );
-                                                          }
-                                                        },
-                                                      )
-                                                    : Icon(
-                                                        Icons.videocam,
-                                                        color: colorScheme
-                                                            .onSurface,
-                                                        size: 32,
-                                                      ),
-                                              )
-                                            : null,
-                                      ),
-                                      if (type == 'audio')
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                            top: 4,
-                                          ),
-                                          child: Text(
-                                            'Voice note',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color:
-                                                  colorScheme.onSurfaceVariant,
+                                                )
+                                              : null,
+                                        ),
+                                        if (type == 'audio')
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 4,
+                                            ),
+                                            child: Text(
+                                              'Voice note',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                Positioned(
-                                  top: -4,
-                                  right: 4,
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        _mediaFiles.removeAt(index);
-                                        _mediaTypes.removeAt(index);
-                                      });
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.all(4),
-                                      decoration: BoxDecoration(
-                                        color: colorScheme.surface,
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: colorScheme.outlineVariant,
+                                  Positioned(
+                                    top: -4,
+                                    right: 4,
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          _mediaFiles.removeAt(localIndex);
+                                          _mediaTypes.removeAt(localIndex);
+                                          _playingIndex = null;
+                                          _hasUnsavedChanges = true;
+                                        });
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: colorScheme.surface,
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: colorScheme.outlineVariant,
+                                          ),
                                         ),
-                                      ),
-                                      child: Icon(
-                                        Icons.close,
-                                        size: 14,
-                                        color: colorScheme.onSurface,
+                                        child: Icon(
+                                          Icons.close,
+                                          size: 14,
+                                          color: colorScheme.onSurface,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ],
-                            );
+                                ],
+                              );
+                            }
                           },
                         ),
                       ),
@@ -1139,6 +1535,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                         ),
                       ),
                     ),
+                    _buildSelectedMusicCard(colorScheme),
 
                     const SizedBox(height: 16),
 
@@ -1670,6 +2067,889 @@ class _RecordingDialogState extends State<RecordingDialog> {
         ),
       ],
       actionsAlignment: MainAxisAlignment.spaceEvenly,
+    );
+  }
+}
+
+class MusicSearchBottomSheet extends StatefulWidget {
+  final ValueChanged<Map<String, dynamic>> onSongSelected;
+  const MusicSearchBottomSheet({super.key, required this.onSongSelected});
+
+  @override
+  State<MusicSearchBottomSheet> createState() => _MusicSearchBottomSheetState();
+}
+
+class _MusicSearchBottomSheetState extends State<MusicSearchBottomSheet> {
+  final TextEditingController _searchController = TextEditingController();
+  final AudioPlayer _musicPlayer = AudioPlayer();
+  List<dynamic> _songs = [];
+  bool _isLoading = false;
+  String? _playingPreviewUrl;
+  PlayerState _playerState = PlayerState.stopped;
+  Timer? _debounce;
+  Duration _duration = Duration.zero;
+  Duration _position = Duration.zero;
+  final Map<String, String> _resolvedUrls = {};
+  bool _soundtrackSeeking = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSeekingSetting();
+    _musicPlayer.onPlayerStateChanged.listen((state) {
+      if (mounted) {
+        setState(() {
+          _playerState = state;
+        });
+      }
+    });
+    _musicPlayer.onDurationChanged.listen((d) {
+      if (mounted) {
+        setState(() {
+          _duration = d;
+        });
+      }
+    });
+    _musicPlayer.onPositionChanged.listen((p) {
+      if (mounted) {
+        setState(() {
+          _position = p;
+        });
+      }
+    });
+    _musicPlayer.onPlayerComplete.listen((_) {
+      if (mounted) {
+        setState(() {
+          _playingPreviewUrl = null;
+          _playerState = PlayerState.stopped;
+          _position = Duration.zero;
+        });
+      }
+    });
+  }
+
+  Future<void> _loadSeekingSetting() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (mounted) {
+        setState(() {
+          _soundtrackSeeking = prefs.getBool('soundtrack_seeking') ?? true;
+        });
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _musicPlayer.stop();
+    _musicPlayer.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+      if (query.trim().isNotEmpty) {
+        _searchSongs(query.trim());
+      }
+    });
+  }
+
+  Future<void> _searchSongs(String query) async {
+    setState(() {
+      _isLoading = true;
+      _songs = [];
+    });
+
+    try {
+      final url = Uri.parse(
+        'https://itunes.apple.com/search?term=${Uri.encodeComponent(query)}&media=music&limit=25',
+      );
+      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (mounted) {
+          setState(() {
+            _songs = data['results'] ?? [];
+            _isLoading = false;
+          });
+        }
+      } else {
+        throw Exception('Server returned status code ${response.statusCode}');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to search music: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _togglePlay(String previewUrl, String? trackViewUrl) async {
+    String playUrl = previewUrl;
+    if (trackViewUrl != null && trackViewUrl.isNotEmpty) {
+      if (_resolvedUrls.containsKey(trackViewUrl)) {
+        playUrl = _resolvedUrls[trackViewUrl]!;
+      } else {
+        try {
+          final response = await http
+              .get(Uri.parse(trackViewUrl))
+              .timeout(const Duration(seconds: 3));
+          if (response.statusCode == 200) {
+            final body = response.body;
+            final regExp = RegExp(r'https://[^\s"]+?\.plus\.aac\.ep\.m4a');
+            final match = regExp.firstMatch(body);
+            if (match != null) {
+              playUrl = match.group(0)!;
+            }
+          }
+        } catch (_) {}
+        _resolvedUrls[trackViewUrl] = playUrl;
+      }
+    }
+
+    try {
+      if (_playingPreviewUrl == playUrl &&
+          _playerState == PlayerState.playing) {
+        await _musicPlayer.pause();
+      } else if (_playingPreviewUrl == playUrl &&
+          _playerState == PlayerState.paused) {
+        await _musicPlayer.resume();
+      } else {
+        await _musicPlayer.stop();
+        setState(() {
+          _playingPreviewUrl = playUrl;
+          _position = Duration.zero;
+          _duration = Duration.zero;
+        });
+        await _musicPlayer.play(UrlSource(playUrl));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to play preview: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  String _formatMusicDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.75,
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHigh,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 16,
+            spreadRadius: 4,
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 12, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Add a Soundtrack',
+                          style: GoogleFonts.gabarito(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: colorScheme.onSurface,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Search millions of songs on Apple Music',
+                          style: GoogleFonts.gabarito(
+                            fontSize: 12,
+                            color: colorScheme.onSurfaceVariant.withValues(
+                              alpha: 0.8,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    style: IconButton.styleFrom(
+                      backgroundColor: colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.4),
+                    ),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: TextField(
+                controller: _searchController,
+                onChanged: _onSearchChanged,
+                onSubmitted: (value) => _searchSongs(value.trim()),
+                style: TextStyle(color: colorScheme.onSurface),
+                decoration: InputDecoration(
+                  hintText: 'Search for songs, artists, or albums...',
+                  hintStyle: GoogleFonts.gabarito(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                    fontSize: 14,
+                  ),
+                  prefixIcon: Padding(
+                    padding: const EdgeInsets.only(left: 8.0),
+                    child: Icon(
+                      Icons.search_rounded,
+                      color: colorScheme.primary,
+                    ),
+                  ),
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: IconButton(
+                            icon: const Icon(Icons.clear_rounded),
+                            onPressed: () {
+                              setState(() {
+                                _searchController.clear();
+                                _songs = [];
+                              });
+                            },
+                          ),
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.7,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28),
+                    borderSide: BorderSide(
+                      color: colorScheme.outline.withValues(alpha: 0.2),
+                      width: 1,
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28),
+                    borderSide: BorderSide(
+                      color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+                      width: 1,
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28),
+                    borderSide: BorderSide(
+                      color: colorScheme.primary,
+                      width: 1.5,
+                    ),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: _isLoading
+                  ? Center(
+                      child: CircularProgressIndicator(
+                        color: colorScheme.primary,
+                      ),
+                    )
+                  : _songs.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _searchController.text.isEmpty
+                                ? Icons.music_note_rounded
+                                : Icons.music_off_rounded,
+                            size: 64,
+                            color: colorScheme.onSurfaceVariant.withValues(
+                              alpha: 0.4,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            _searchController.text.isEmpty
+                                ? 'Search for music to preview'
+                                : 'No songs found',
+                            style: GoogleFonts.gabarito(
+                              fontSize: 16,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: _songs.length,
+                      itemBuilder: (context, index) {
+                        final song = _songs[index];
+                        final trackName = song['trackName'] ?? 'Unknown Track';
+                        final artistName =
+                            song['artistName'] ?? 'Unknown Artist';
+                        final albumName = song['collectionName'] ?? '';
+                        final artworkUrl = song['artworkUrl100'] ?? '';
+                        final previewUrl = song['previewUrl'] ?? '';
+                        final trackViewUrl = song['trackViewUrl'] ?? '';
+
+                        final isCurrentPlaying =
+                            _playingPreviewUrl == previewUrl ||
+                            (_resolvedUrls[trackViewUrl] != null &&
+                                _playingPreviewUrl ==
+                                    _resolvedUrls[trackViewUrl]);
+                        final isPlaying =
+                            isCurrentPlaying &&
+                            _playerState == PlayerState.playing;
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(
+                            color: isCurrentPlaying
+                                ? colorScheme.primaryContainer.withValues(
+                                    alpha: 0.3,
+                                  )
+                                : colorScheme.surfaceContainerHighest
+                                      .withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: isCurrentPlaying
+                                  ? colorScheme.primary
+                                  : Colors.transparent,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ListTile(
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                leading: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: artworkUrl.isNotEmpty
+                                      ? Image.network(
+                                          artworkUrl,
+                                          width: 50,
+                                          height: 50,
+                                          fit: BoxFit.cover,
+                                          errorBuilder:
+                                              (context, error, stackTrace) =>
+                                                  Container(
+                                                    width: 50,
+                                                    height: 50,
+                                                    color: colorScheme
+                                                        .surfaceContainer,
+                                                    child: Icon(
+                                                      Icons.music_note_rounded,
+                                                      color: colorScheme
+                                                          .onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                        )
+                                      : Container(
+                                          width: 50,
+                                          height: 50,
+                                          color: colorScheme.surfaceContainer,
+                                          child: Icon(
+                                            Icons.music_note_rounded,
+                                            color: colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                ),
+                                title: Text(
+                                  trackName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.gabarito(
+                                    fontWeight: FontWeight.bold,
+                                    color: colorScheme.onSurface,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '$artistName${albumName.isNotEmpty ? " • $albumName" : ""}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (previewUrl.isNotEmpty)
+                                      Stack(
+                                        alignment: Alignment.center,
+                                        children: [
+                                          if (isCurrentPlaying)
+                                            SizedBox(
+                                              width: 40,
+                                              height: 40,
+                                              child: CircularProgressIndicator(
+                                                value:
+                                                    _duration.inMilliseconds > 0
+                                                    ? _position.inMilliseconds /
+                                                          _duration
+                                                              .inMilliseconds
+                                                    : 0.0,
+                                                strokeWidth: 2,
+                                                backgroundColor:
+                                                    colorScheme.outlineVariant,
+                                                valueColor:
+                                                    AlwaysStoppedAnimation<
+                                                      Color
+                                                    >(colorScheme.primary),
+                                              ),
+                                            ),
+                                          IconButton(
+                                            icon: Icon(
+                                              isPlaying
+                                                  ? Icons.pause_rounded
+                                                  : Icons.play_arrow_rounded,
+                                              size: 24,
+                                              color: isPlaying
+                                                  ? colorScheme.primary
+                                                  : colorScheme
+                                                        .onSurfaceVariant,
+                                            ),
+                                            onPressed: () => _togglePlay(
+                                              previewUrl,
+                                              trackViewUrl,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.add_circle_outline_rounded,
+                                        size: 24,
+                                      ),
+                                      onPressed: () {
+                                        widget.onSongSelected(song);
+                                        Navigator.pop(context);
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (isCurrentPlaying) ...[
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 12,
+                                    right: 12,
+                                    bottom: 8,
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      SliderTheme(
+                                        data: SliderTheme.of(context).copyWith(
+                                          trackHeight: 4,
+                                          activeTrackColor: colorScheme.primary,
+                                          inactiveTrackColor:
+                                              colorScheme.secondaryContainer,
+                                          thumbColor: colorScheme.primary,
+                                          thumbShape: _soundtrackSeeking
+                                              ? const RoundSliderThumbShape(
+                                                  enabledThumbRadius: 6,
+                                                  pressedElevation: 0,
+                                                )
+                                              : const RoundSliderThumbShape(
+                                                  enabledThumbRadius: 0,
+                                                  disabledThumbRadius: 0,
+                                                  pressedElevation: 0,
+                                                ),
+                                          overlayColor: colorScheme.primary
+                                              .withValues(alpha: 0.08),
+                                          overlayShape:
+                                              const RoundSliderOverlayShape(
+                                                overlayRadius: 12,
+                                              ),
+                                          trackShape:
+                                              const RoundedRectSliderTrackShape(),
+                                          showValueIndicator:
+                                              ShowValueIndicator.never,
+                                          padding: EdgeInsets.zero,
+                                        ),
+                                        child: SizedBox(
+                                          height: 24,
+                                          child: Slider(
+                                            value: _position.inMilliseconds
+                                                .toDouble()
+                                                .clamp(
+                                                  0.0,
+                                                  _duration.inMilliseconds
+                                                      .toDouble(),
+                                                ),
+                                            max: _duration.inMilliseconds > 0
+                                                ? _duration.inMilliseconds
+                                                      .toDouble()
+                                                : 1.0,
+                                            onChanged: _soundtrackSeeking
+                                                ? (val) {
+                                                    _musicPlayer.seek(
+                                                      Duration(
+                                                        milliseconds: val
+                                                            .toInt(),
+                                                      ),
+                                                    );
+                                                  }
+                                                : null,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            _formatMusicDuration(_position),
+                                            style: GoogleFonts.gabarito(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w500,
+                                              color: colorScheme
+                                                  .onSurfaceVariant
+                                                  .withValues(alpha: 0.7),
+                                            ),
+                                          ),
+                                          Text(
+                                            _formatMusicDuration(_duration),
+                                            style: GoogleFonts.gabarito(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w500,
+                                              color: colorScheme
+                                                  .onSurfaceVariant
+                                                  .withValues(alpha: 0.7),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.apple,
+                    size: 18,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Powered by Apple Music / iTunes',
+                    style: GoogleFonts.gabarito(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ExistingMediaPreview extends StatefulWidget {
+  final String fileId;
+  final ApiService apiService;
+  final VoidCallback onDelete;
+
+  const _ExistingMediaPreview({
+    super.key,
+    required this.fileId,
+    required this.apiService,
+    required this.onDelete,
+  });
+
+  @override
+  State<_ExistingMediaPreview> createState() => _ExistingMediaPreviewState();
+}
+
+class _ExistingMediaPreviewState extends State<_ExistingMediaPreview> {
+  late String _url;
+  late String _type;
+  bool _isLoading = true;
+  Map<String, String> _headers = {};
+  AudioPlayer? _audioPlayer;
+  bool _isPlayingAudio = false;
+  File? _audioFile;
+
+  @override
+  void initState() {
+    super.initState();
+    _url =
+        '${AppConfig.appwriteEndpoint}/storage/buckets/6957d8c0001c106bf6cf/files/${widget.fileId}/view?project=${AppConfig.appwriteProjectId}';
+
+    if (widget.fileId.startsWith('image')) {
+      _type = 'image';
+    } else if (widget.fileId.startsWith('video')) {
+      _type = 'video';
+    } else if (widget.fileId.startsWith('audio')) {
+      _type = 'audio';
+    } else {
+      _type = 'unknown';
+    }
+
+    _initializeMedia();
+  }
+
+  Future<void> _initializeMedia() async {
+    try {
+      final jwt = await widget.apiService.getJwtToken();
+      if (jwt != null && mounted) {
+        setState(() {
+          _headers = {
+            'X-Appwrite-Project': AppConfig.appwriteProjectId,
+            'X-Appwrite-JWT': jwt,
+          };
+        });
+      }
+
+      if (_type == 'audio') {
+        _audioPlayer = AudioPlayer();
+        final bytes = await widget.apiService.storage.getFileView(
+          bucketId: '6957d8c0001c106bf6cf',
+          fileId: widget.fileId,
+        );
+        final dir = await getTemporaryDirectory();
+        _audioFile = File('${dir.path}/${widget.fileId}');
+        await _audioFile!.writeAsBytes(bytes);
+        _audioPlayer!.onPlayerComplete.listen((_) {
+          if (mounted) {
+            setState(() => _isPlayingAudio = false);
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error initializing existing media: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _audioPlayer?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    Widget content;
+    if (_isLoading) {
+      content = const Center(
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    } else if (_type == 'image') {
+      content = GestureDetector(
+        onTap: () {
+          showDialog(
+            context: context,
+            builder: (context) => Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: EdgeInsets.zero,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  InteractiveViewer(
+                    child: Image.network(
+                      _url,
+                      headers: _headers,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                  Positioned(
+                    top: 16,
+                    right: 16,
+                    child: IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.network(
+            _url,
+            headers: _headers,
+            fit: BoxFit.cover,
+            width: 100,
+            height: 80,
+            errorBuilder: (ctx, err, stack) => Container(
+              color: colorScheme.surfaceContainerHigh,
+              child: const Icon(Icons.broken_image),
+            ),
+          ),
+        ),
+      );
+    } else if (_type == 'video') {
+      content = Center(
+        child: Icon(Icons.videocam, color: colorScheme.onSurface, size: 32),
+      );
+    } else if (_type == 'audio') {
+      content = Center(
+        child: IconButton(
+          icon: Icon(
+            _isPlayingAudio ? Icons.stop : Icons.play_arrow,
+            color: colorScheme.onSurface,
+            size: 32,
+          ),
+          onPressed: () async {
+            if (_audioPlayer == null || _audioFile == null) return;
+            if (_isPlayingAudio) {
+              await _audioPlayer!.stop();
+              setState(() => _isPlayingAudio = false);
+            } else {
+              await _audioPlayer!.play(DeviceFileSource(_audioFile!.path));
+              setState(() => _isPlayingAudio = true);
+            }
+          },
+        ),
+      );
+    } else {
+      content = const Center(child: Icon(Icons.insert_drive_file));
+    }
+
+    return Stack(
+      children: [
+        Container(
+          width: 100,
+          margin: const EdgeInsets.only(right: 12),
+          child: Column(
+            children: [
+              Container(
+                height: 80,
+                width: 100,
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: colorScheme.outlineVariant),
+                ),
+                child: content,
+              ),
+              if (_type == 'audio')
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Voice note',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              if (_type == 'video')
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Video',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Positioned(
+          top: -4,
+          right: 4,
+          child: GestureDetector(
+            onTap: widget.onDelete,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                shape: BoxShape.circle,
+                border: Border.all(color: colorScheme.outlineVariant),
+              ),
+              child: Icon(Icons.close, size: 14, color: colorScheme.onSurface),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

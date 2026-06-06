@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 import 'screens/create_memory.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
@@ -46,6 +48,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   final _pinController = TextEditingController();
 
   bool _isCalendarView = false;
+  bool _compactView = false;
   Map<int, Map<int, Map<int, List<dynamic>>>> _groupedMemories = {};
   final Set<int> _collapsedYears = {};
   final Set<String> _collapsedMonths = {};
@@ -228,6 +231,16 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     _introController = AnimationController(vsync: this);
     _scrollController.addListener(_onScroll);
     _checkInitialState();
+    _loadCompactViewSetting();
+  }
+
+  Future<void> _loadCompactViewSetting() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _compactView = prefs.getBool('compact_memories_list') ?? false;
+      });
+    } catch (_) {}
   }
 
   int _currentOffset = 0;
@@ -963,6 +976,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
             colorScheme,
             memory,
             _getColor(memory['tagColor']),
+            showDate: true,
           ),
         );
       },
@@ -1256,6 +1270,135 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     );
   }
 
+  String _getDescriptionPreview(String? descriptionText) {
+    if (descriptionText == null || descriptionText.isEmpty) return '';
+    String desc = descriptionText;
+    if (desc.contains('%%LISTENED_TO:')) {
+      desc = desc.split('%%LISTENED_TO:')[0].trim();
+    }
+    try {
+      final decoded = jsonDecode(desc);
+      if (decoded is List) {
+        final buffer = StringBuffer();
+        for (var op in decoded) {
+          if (op is Map && op.containsKey('insert')) {
+            final insert = op['insert'];
+            if (insert is String) {
+              buffer.write(insert);
+            }
+          }
+        }
+        return buffer.toString().trim();
+      }
+    } catch (_) {}
+    return desc.trim();
+  }
+
+  Future<void> _confirmAndDeleteMemory(
+    BuildContext context,
+    dynamic memory,
+  ) async {
+    final isDraft = memory['isDraft'] == true;
+    final id = (memory['\$id'] ?? memory['id'] ?? memory['memoryId'] ?? '')
+        .toString();
+    if (id.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) {
+        final cs = Theme.of(dCtx).colorScheme;
+        return AlertDialog(
+          backgroundColor: cs.surfaceContainerHigh,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.delete_outline_rounded, color: cs.error),
+              const SizedBox(width: 10),
+              Text(
+                isDraft ? 'Delete draft?' : 'Delete memory?',
+                style: GoogleFonts.gabarito(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: cs.onSurface,
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            isDraft
+                ? 'Are you sure you want to delete this draft? This cannot be undone.'
+                : 'Are you sure you want to permanently delete this memory? This cannot be undone.',
+            style: GoogleFonts.gabarito(
+              fontSize: 14,
+              color: cs.onSurfaceVariant,
+            ),
+          ),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: cs.onSurfaceVariant,
+                textStyle: GoogleFonts.gabarito(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              onPressed: () => Navigator.pop(dCtx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.tonal(
+              style: FilledButton.styleFrom(
+                backgroundColor: cs.errorContainer,
+                foregroundColor: cs.error,
+                textStyle: GoogleFonts.gabarito(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: () => Navigator.pop(dCtx, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      try {
+        if (isDraft) {
+          final draft = memory['draftObject'];
+          if (draft != null) {
+            await DraftManager.deleteDraft(draft.id);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Draft deleted successfully')),
+              );
+            }
+          }
+        } else {
+          await widget.apiService.deleteMemory(id);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Memory deleted successfully')),
+            );
+          }
+        }
+        _loadMemories();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+        }
+      }
+    }
+  }
+
   Widget _buildMemoryCard(
     BuildContext context,
     ColorScheme colorScheme,
@@ -1263,19 +1406,26 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     Color color, {
     bool isStackTop = false,
     int count = 1,
+    bool showDate = false,
   }) {
     final isDraft = memory['isDraft'] == true;
     final tag = memory['tag'];
+    final mood = memory['mood'];
     final cardColor = _getColor(memory['tagColor']);
+    final description = memory['description'];
+    final files = memory['files'] as List<dynamic>? ?? [];
+
+    final descPreview = _getDescriptionPreview(description);
+    final hasFiles = files.isNotEmpty;
 
     return Material(
-      color: colorScheme.surfaceContainer,
+      color: colorScheme.surfaceContainerLow,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
           color: isDraft
-              ? colorScheme.primary.withOpacity(0.5)
-              : colorScheme.outlineVariant.withOpacity(0.5),
+              ? colorScheme.primary.withValues(alpha: 0.5)
+              : colorScheme.outlineVariant.withValues(alpha: 0.3),
           width: isDraft ? 2 : 1,
         ),
       ),
@@ -1303,8 +1453,11 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                   _openMemory(memory);
                 }
               },
+        onLongPress: isStackTop
+            ? null
+            : () => _confirmAndDeleteMemory(context, memory),
         child: Padding(
-          padding: const EdgeInsets.all(12.0),
+          padding: const EdgeInsets.all(16.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1322,7 +1475,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                     ),
                     child: Text(
                       'Draft',
-                      style: TextStyle(
+                      style: GoogleFonts.gabarito(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
                         color: colorScheme.onPrimaryContainer,
@@ -1331,6 +1484,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                   ),
                 ),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Text(
@@ -1344,11 +1498,34 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (isStackTop)
+                  if (showDate && memory['createdAt'] != null) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      () {
+                        try {
+                          final parsedDate = DateTime.parse(
+                            memory['createdAt'],
+                          );
+                          return DateFormat('MMM d, yyyy').format(parsedDate);
+                        } catch (_) {
+                          return '';
+                        }
+                      }(),
+                      style: GoogleFonts.gabarito(
+                        fontSize: 11,
+                        color: colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.7,
+                        ),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                  if (isStackTop) ...[
+                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
+                        horizontal: 8,
+                        vertical: 4,
                       ),
                       decoration: BoxDecoration(
                         color: colorScheme.primary,
@@ -1356,24 +1533,141 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                       ),
                       child: Text(
                         '+${count - 1}',
-                        style: TextStyle(
+                        style: GoogleFonts.gabarito(
                           color: colorScheme.onPrimary,
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
+                  ],
                 ],
               ),
-              if (tag != null && tag.toString().isNotEmpty) ...[
-                const SizedBox(height: 4),
+              if (!_compactView && descPreview.isNotEmpty) ...[
+                const SizedBox(height: 6),
                 Text(
-                  tag,
+                  descPreview,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.gabarito(
-                    fontSize: 12,
-                    color: cardColor,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: colorScheme.onSurfaceVariant,
+                    height: 1.3,
                   ),
+                ),
+              ],
+              if ((tag != null && tag.toString().isNotEmpty) ||
+                  (mood != null && mood.toString().isNotEmpty) ||
+                  hasFiles) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (tag != null && tag.toString().isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: cardColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: cardColor.withValues(alpha: 0.2),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.label_outline_rounded,
+                              size: 12,
+                              color: cardColor,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              tag.toString(),
+                              style: GoogleFonts.gabarito(
+                                fontSize: 11,
+                                color: cardColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (mood != null && mood.toString().isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: colorScheme.outlineVariant.withValues(
+                              alpha: 0.5,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              mood.toString(),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Mood',
+                              style: GoogleFonts.gabarito(
+                                fontSize: 11,
+                                color: colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (hasFiles)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: colorScheme.outlineVariant.withValues(
+                              alpha: 0.5,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.attach_file_rounded,
+                              size: 12,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              files.length.toString(),
+                              style: GoogleFonts.gabarito(
+                                fontSize: 11,
+                                color: colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ],
