@@ -1056,6 +1056,18 @@ class ApiService {
     );
   }
 
+  Future<Map<String, dynamic>> getPublicMemory(String memoryId) async {
+    final response = await _performRequest(
+      'GET',
+      '/api/public/memories/$memoryId',
+    );
+    if (response.statusCode == 200) {
+      return (await compute(_parseJson, response.body)) as Map<String, dynamic>;
+    } else {
+      throw Exception('Failed to load public memory: ${response.body}');
+    }
+  }
+
   Future<Map<String, dynamic>> getMemories({int? length, int? offset}) async {
     String endpoint = '/api/memory-lanes';
     final queryParams = <String>[];

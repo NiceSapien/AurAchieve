@@ -44,6 +44,8 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
   bool _isPlayingMusic = false;
   String? _playingMusicUrl;
   bool _soundtrackSeeking = true;
+  String? _currentUserUsername;
+  String? _currentUserName;
 
   @override
   void initState() {
@@ -51,6 +53,26 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
     _loadSeekingSetting();
     _initQuill();
     _initAudioListeners();
+    _loadCurrentUser();
+  }
+
+  Future<void> _loadCurrentUser() async {
+    try {
+      if (widget.apiService != null) {
+        final user = await widget.apiService!.account.get();
+        if (mounted) {
+          setState(() {
+            _currentUserName = user.name;
+          });
+        }
+        final page = await widget.apiService!.getAuraPage();
+        if (mounted && page.isNotEmpty) {
+          setState(() {
+            _currentUserUsername = page['username'];
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   void _initAudioListeners() {
@@ -173,6 +195,36 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
     );
   }
 
+  Widget _buildAuthorChip(ColorScheme colorScheme, String author) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: colorScheme.secondaryContainer.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colorScheme.secondary.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.person_outline_rounded,
+            size: 14,
+            color: colorScheme.secondary,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'By $author',
+            style: GoogleFonts.gabarito(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: colorScheme.secondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMoodChip(ColorScheme colorScheme, String mood) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -232,6 +284,12 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
     final createdAt = widget.memory['createdAt'];
     final tag = widget.memory['tag'];
     final mood = widget.memory['mood'];
+    final author = widget.memory['author']?.toString();
+    final isOwnMemory =
+        author == null ||
+        author.isEmpty ||
+        author == _currentUserUsername ||
+        author == _currentUserName;
     final tagColorName = widget.memory['tagColor'];
     final files = widget.memory['files'] as List<dynamic>? ?? [];
     final isPublic = widget.memory['public'] == true;
@@ -494,6 +552,8 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                 runSpacing: 8,
                 children: [
                   if (date != null) _buildDateChip(colorScheme, date),
+                  if (!isOwnMemory && author.isNotEmpty)
+                    _buildAuthorChip(colorScheme, author),
                   if (mood != null && mood.toString().isNotEmpty)
                     _buildMoodChip(colorScheme, mood.toString()),
                   if (tag != null && tag.toString().isNotEmpty)
@@ -540,7 +600,7 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                   ),
                 ),
               ),
-              _buildListenedToCard(colorScheme),
+              _buildListenedToCard(colorScheme, isOwnMemory),
             ],
           ),
         ),
@@ -604,7 +664,7 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
     }
   }
 
-  Widget _buildListenedToCard(ColorScheme colorScheme) {
+  Widget _buildListenedToCard(ColorScheme colorScheme, bool isOwnMemory) {
     if (_selectedSong == null) return const SizedBox.shrink();
 
     final trackName = _selectedSong!['trackName'] ?? 'Unknown Track';
@@ -639,7 +699,9 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
               ),
               const SizedBox(width: 6),
               Text(
-                'WHAT I\'VE BEEN LISTENING TO',
+                isOwnMemory
+                    ? 'WHAT I\'VE BEEN LISTENING TO'
+                    : 'BEEN LISTENING TO',
                 style: GoogleFonts.gabarito(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,

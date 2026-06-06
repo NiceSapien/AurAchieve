@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:app_links/app_links.dart';
+import 'screens/view_memory.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:appwrite/appwrite.dart' as appwrite;
@@ -113,18 +116,98 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   bool _dynamicColor = true;
   String _themeMode = 'auto';
+  late final ApiService _apiService;
+  late final AppLinks _appLinks;
+  StreamSubscription<Uri>? _linkSubscription;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _apiService = ApiService(account: widget.account);
     _loadThemeSettings();
+    _initDeepLinks();
   }
 
   @override
   void dispose() {
+    _linkSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _initDeepLinks() {
+    _appLinks = AppLinks();
+
+    // Check initial link (when app is opened via link from a cold state)
+    _appLinks.getInitialLink().then((uri) {
+      if (uri != null) {
+        _handleDeepLink(uri);
+      }
+    });
+
+    // Listen to incoming links (when app is already running)
+    _linkSubscription = _appLinks.uriLinkStream.listen(
+      (uri) {
+        _handleDeepLink(uri);
+      },
+      onError: (err) {
+        debugPrint('Deep Link Error: $err');
+      },
+    );
+  }
+
+  void _handleDeepLink(Uri uri) {
+    final segments = uri.pathSegments;
+    if (segments.length >= 3 && segments[1] == 'memory') {
+      final memoryId = segments[2];
+      _navigateToPublicMemory(memoryId);
+    }
+  }
+
+  Future<void> _navigateToPublicMemory(String memoryId) async {
+    while (navigatorKey.currentState == null) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    final context = navigatorKey.currentContext;
+    if (context == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final memory = await _apiService.getPublicMemory(memoryId);
+
+      // Dismiss loading dialog
+      if (navigatorKey.currentContext != null) {
+        Navigator.of(navigatorKey.currentContext!).pop();
+      }
+
+      navigatorKey.currentState!.push(
+        MaterialPageRoute(
+          builder: (context) => MemoryDetailPage(
+            memory: memory,
+            apiService: _apiService,
+            e2eEnabled: false,
+          ),
+        ),
+      );
+    } catch (e) {
+      // Dismiss loading dialog
+      if (navigatorKey.currentContext != null) {
+        Navigator.of(navigatorKey.currentContext!).pop();
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to load memory: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override
