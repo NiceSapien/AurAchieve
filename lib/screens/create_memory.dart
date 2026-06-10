@@ -6,7 +6,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:flutter_avif/flutter_avif.dart';
+import '../widgets/smart_avif_image.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -56,6 +58,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   Timer? _autoSaveTimer;
   String? _currentDraftId;
   List<String> _existingFileIds = [];
+  bool _isProcessingAttachment = false;
 
   List<String> _recentMoods = [];
 
@@ -324,29 +327,65 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery);
     if (picked != null) {
+      setState(() => _isProcessingAttachment = true);
       final file = File(picked.path);
 
       final dir = await getTemporaryDirectory();
+      final tempJpgPath =
+          '${dir.path}/temp_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final targetPath =
           '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.avif';
 
       try {
-        final originalBytes = await file.readAsBytes();
+        // 1. Compress and downscale to a temporary JPEG first
+        final compressedXFile = await FlutterImageCompress.compressAndGetFile(
+          file.absolute.path,
+          tempJpgPath,
+          minWidth: 1024,
+          minHeight: 1024,
+          quality: 90,
+          format: CompressFormat.jpeg,
+        );
+
+        if (compressedXFile == null) {
+          throw Exception('Failed to resize image');
+        }
+
+        // 2. Read resized JPEG bytes
+        final resizedBytes = await File(compressedXFile.path).readAsBytes();
+
+        // 3. Encode to AVIF
         final avifBytes = await encodeAvif(
-          originalBytes,
+          resizedBytes,
           speed: 8,
           minQuantizer: 20,
           maxQuantizer: 35,
         );
+
+        // 4. Save AVIF bytes
         final resultFile = File(targetPath);
         await resultFile.writeAsBytes(avifBytes);
+
+        // 5. Clean up temporary JPEG
+        try {
+          await File(tempJpgPath).delete();
+        } catch (_) {}
 
         setState(() {
           _mediaFiles.add(resultFile);
           _mediaTypes.add('image');
         });
       } catch (e) {
-        _showError('Failed to encode image to AVIF: $e');
+        // Clean up if temp file exists
+        try {
+          final f = File(tempJpgPath);
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
+        _showError('Failed to process image: $e');
+      } finally {
+        if (mounted) {
+          setState(() => _isProcessingAttachment = false);
+        }
       }
     }
   }
@@ -355,16 +394,25 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
     final picker = ImagePicker();
     final picked = await picker.pickVideo(source: ImageSource.gallery);
     if (picked != null) {
-      final file = File(picked.path);
-      final dir = await getTemporaryDirectory();
-      final tempFile = File(
-        '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.hevc',
-      );
-      await file.copy(tempFile.path);
-      setState(() {
-        _mediaFiles.add(tempFile);
-        _mediaTypes.add('video');
-      });
+      setState(() => _isProcessingAttachment = true);
+      try {
+        final file = File(picked.path);
+        final dir = await getTemporaryDirectory();
+        final tempFile = File(
+          '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.hevc',
+        );
+        await file.copy(tempFile.path);
+        setState(() {
+          _mediaFiles.add(tempFile);
+          _mediaTypes.add('video');
+        });
+      } catch (e) {
+        _showError('Failed to copy video: $e');
+      } finally {
+        if (mounted) {
+          setState(() => _isProcessingAttachment = false);
+        }
+      }
     }
   }
 
@@ -1212,7 +1260,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
               ),
             const SizedBox(width: 8),
             FilledButton(
-              onPressed: _isSaving ? null : _save,
+              onPressed: (_isSaving || _isProcessingAttachment) ? null : _save,
               style: FilledButton.styleFrom(
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
@@ -1362,13 +1410,15 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                     ],
 
                     if (_existingFileIds.isNotEmpty ||
-                        _mediaFiles.isNotEmpty) ...[
+                        _mediaFiles.isNotEmpty ||
+                        _isProcessingAttachment) ...[
                       SizedBox(
                         height: 120,
                         child: ListView.builder(
                           scrollDirection: Axis.horizontal,
-                          itemCount:
-                              _existingFileIds.length + _mediaFiles.length,
+                          itemCount: _existingFileIds.length +
+                              _mediaFiles.length +
+                              (_isProcessingAttachment ? 1 : 0),
                           itemBuilder: (context, index) {
                             if (index < _existingFileIds.length) {
                               final fileId = _existingFileIds[index];
@@ -1383,7 +1433,8 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                                   });
                                 },
                               );
-                            } else {
+                            } else if (index <
+                                _existingFileIds.length + _mediaFiles.length) {
                               final localIndex =
                                   index - _existingFileIds.length;
                               final file = _mediaFiles[localIndex];
@@ -1412,7 +1463,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                                               ? ClipRRect(
                                                   borderRadius:
                                                       BorderRadius.circular(11),
-                                                  child: AvifImage.file(
+                                                  child: SmartAvifImage.file(
                                                     file,
                                                     fit: BoxFit.cover,
                                                     width: 100,
@@ -1514,6 +1565,28 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                                     ),
                                   ),
                                 ],
+                              );
+                            } else {
+                              return Container(
+                                width: 100,
+                                height: 80,
+                                margin: const EdgeInsets.only(right: 12),
+                                decoration: BoxDecoration(
+                                  color: colorScheme.surfaceContainerHigh,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: colorScheme.outlineVariant,
+                                  ),
+                                ),
+                                child: const Center(
+                                  child: SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                ),
                               );
                             }
                           },
@@ -2835,7 +2908,7 @@ class _ExistingMediaPreviewState extends State<_ExistingMediaPreview> {
                 alignment: Alignment.center,
                 children: [
                   InteractiveViewer(
-                    child: AvifImage.network(
+                    child: SmartAvifImage.network(
                       _url,
                       headers: _headers,
                       fit: BoxFit.contain,
@@ -2856,7 +2929,7 @@ class _ExistingMediaPreviewState extends State<_ExistingMediaPreview> {
         },
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: AvifImage.network(
+          child: SmartAvifImage.network(
             _url,
             headers: _headers,
             fit: BoxFit.cover,

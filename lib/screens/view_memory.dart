@@ -17,7 +17,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import '../utils/crypto_utils.dart';
-import 'package:flutter_avif/flutter_avif.dart';
+import '../widgets/smart_avif_image.dart';
 
 class MemoryDetailPage extends StatefulWidget {
   final Map<String, dynamic> memory;
@@ -1142,11 +1142,11 @@ class _MediaItemState extends State<_MediaItem> {
                 children: [
                   InteractiveViewer(
                     child: _isEncrypted && _decryptedFile != null
-                        ? AvifImage.file(
+                        ? SmartAvifImage.file(
                             _decryptedFile!,
                             fit: BoxFit.contain,
                           )
-                        : AvifImage.network(
+                        : SmartAvifImage.network(
                             _url,
                             headers: _headers,
                             fit: BoxFit.contain,
@@ -1168,13 +1168,13 @@ class _MediaItemState extends State<_MediaItem> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: _isEncrypted && _decryptedFile != null
-              ? AvifImage.file(
+              ? SmartAvifImage.file(
                   _decryptedFile!,
                   fit: BoxFit.cover,
                   width: 200,
                   height: 200,
                 )
-              : AvifImage.network(
+              : SmartAvifImage.network(
                   _url,
                   headers: _headers,
                   fit: BoxFit.cover,
