@@ -5,7 +5,7 @@ import 'package:appwrite/models.dart' as models;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:flutter_avif/flutter_avif.dart';
 import 'dart:io';
 import 'api_service.dart';
 
@@ -144,16 +144,15 @@ class _ProfilePageState extends State<ProfilePage> {
         await targetFile.delete();
       }
 
-      final result = await FlutterImageCompress.compressAndGetFile(
-        croppedFile.path,
-        targetPath,
-        format: CompressFormat.webp,
-        quality: 95,
+      final croppedBytes = await File(croppedFile.path).readAsBytes();
+      final avifBytes = await encodeAvif(
+        croppedBytes,
+        speed: 8,
+        minQuantizer: 20,
+        maxQuantizer: 35,
       );
-
-      if (result == null) throw Exception('Failed to compress image');
-
-      final resultFile = File(result.path);
+      final resultFile = File(targetPath);
+      await resultFile.writeAsBytes(avifBytes);
       final length = await resultFile.length();
 
       if (length > 2 * 1024 * 1024) {
@@ -358,8 +357,8 @@ class _ProfilePageState extends State<ProfilePage> {
                           radius: 48,
                           backgroundColor: scheme.primaryContainer,
                           foregroundImage: _user != null && username != null
-                              ? NetworkImage(
-                                  'https://cloud.appwrite.io/v1/storage/buckets/69538a24001337545e6b/files/$username/view?project=6800a2680008a268a6a3',
+                              ? NetworkAvifImage(
+                                  '${AppConfig.appwriteEndpoint}/storage/buckets/${AppConfig.profileBucketId}/files/$username/view?project=${AppConfig.appwriteProjectId}',
                                 )
                               : null,
                           onForegroundImageError:

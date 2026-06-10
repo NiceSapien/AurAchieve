@@ -6,7 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:image_picker/image_picker.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:flutter_avif/flutter_avif.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -329,17 +329,24 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
       final dir = await getTemporaryDirectory();
       final targetPath =
           '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.avif';
-      final result = await FlutterImageCompress.compressAndGetFile(
-        file.absolute.path,
-        targetPath,
-        format: CompressFormat.webp,
-      );
 
-      if (result != null) {
+      try {
+        final originalBytes = await file.readAsBytes();
+        final avifBytes = await encodeAvif(
+          originalBytes,
+          speed: 8,
+          minQuantizer: 20,
+          maxQuantizer: 35,
+        );
+        final resultFile = File(targetPath);
+        await resultFile.writeAsBytes(avifBytes);
+
         setState(() {
-          _mediaFiles.add(File(result.path));
+          _mediaFiles.add(resultFile);
           _mediaTypes.add('image');
         });
+      } catch (e) {
+        _showError('Failed to encode image to AVIF: $e');
       }
     }
   }
@@ -1400,15 +1407,19 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                                             border: Border.all(
                                               color: colorScheme.outlineVariant,
                                             ),
-                                            image: type == 'image'
-                                                ? DecorationImage(
-                                                    image: FileImage(file),
-                                                    fit: BoxFit.cover,
-                                                  )
-                                                : null,
                                           ),
-                                          child: type != 'image'
-                                              ? Center(
+                                          child: type == 'image'
+                                              ? ClipRRect(
+                                                  borderRadius:
+                                                      BorderRadius.circular(11),
+                                                  child: AvifImage.file(
+                                                    file,
+                                                    fit: BoxFit.cover,
+                                                    width: 100,
+                                                    height: 80,
+                                                  ),
+                                                )
+                                              : Center(
                                                   child: type == 'audio'
                                                       ? IconButton(
                                                           icon: Icon(
@@ -1454,8 +1465,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                                                               .onSurface,
                                                           size: 32,
                                                         ),
-                                                )
-                                              : null,
+                                                ),
                                         ),
                                         if (type == 'audio')
                                           Padding(
@@ -2741,7 +2751,7 @@ class _ExistingMediaPreviewState extends State<_ExistingMediaPreview> {
   void initState() {
     super.initState();
     _url =
-        '${AppConfig.appwriteEndpoint}/storage/buckets/6957d8c0001c106bf6cf/files/${widget.fileId}/view?project=${AppConfig.appwriteProjectId}';
+        '${AppConfig.appwriteEndpoint}/storage/buckets/${AppConfig.memoryLanesBucketId}/files/${widget.fileId}/view?project=${AppConfig.appwriteProjectId}';
 
     if (widget.fileId.startsWith('image')) {
       _type = 'image';
@@ -2771,7 +2781,7 @@ class _ExistingMediaPreviewState extends State<_ExistingMediaPreview> {
       if (_type == 'audio') {
         _audioPlayer = AudioPlayer();
         final bytes = await widget.apiService.storage.getFileView(
-          bucketId: '6957d8c0001c106bf6cf',
+          bucketId: AppConfig.memoryLanesBucketId,
           fileId: widget.fileId,
         );
         final dir = await getTemporaryDirectory();
@@ -2825,7 +2835,7 @@ class _ExistingMediaPreviewState extends State<_ExistingMediaPreview> {
                 alignment: Alignment.center,
                 children: [
                   InteractiveViewer(
-                    child: Image.network(
+                    child: AvifImage.network(
                       _url,
                       headers: _headers,
                       fit: BoxFit.contain,
@@ -2846,7 +2856,7 @@ class _ExistingMediaPreviewState extends State<_ExistingMediaPreview> {
         },
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: Image.network(
+          child: AvifImage.network(
             _url,
             headers: _headers,
             fit: BoxFit.cover,

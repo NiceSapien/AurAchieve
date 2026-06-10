@@ -24,6 +24,12 @@ class AppConfig {
   static const String defaultAppwriteProjectId = '6800a2680008a268a6a3';
   static String appwriteProjectId = defaultAppwriteProjectId;
 
+  static const String defaultProfileBucketId = '69538a24001337545e6b';
+  static String profileBucketId = defaultProfileBucketId;
+
+  static const String defaultMemoryLanesBucketId = '6957d8c0001c106bf6cf';
+  static String memoryLanesBucketId = defaultMemoryLanesBucketId;
+
   static void setBaseUrl(String newUrl) {
     if (newUrl.isNotEmpty &&
         (newUrl.startsWith('http://') || newUrl.startsWith('https://'))) {
@@ -33,19 +39,35 @@ class AppConfig {
     }
   }
 
-  static void setAppwriteConfig(String endpoint, String projectId) {
+  static void setAppwriteConfig(
+    String endpoint,
+    String projectId, {
+    String? memoryLanesBucket,
+    String? profileBucket,
+  }) {
     if (endpoint.isNotEmpty) appwriteEndpoint = endpoint;
     if (projectId.isNotEmpty) appwriteProjectId = projectId;
+    profileBucketId = (profileBucket != null && profileBucket.isNotEmpty)
+        ? profileBucket
+        : defaultProfileBucketId;
+    memoryLanesBucketId =
+        (memoryLanesBucket != null && memoryLanesBucket.isNotEmpty)
+            ? memoryLanesBucket
+            : defaultMemoryLanesBucketId;
   }
 
   static const String _prefKey = 'api_base_url';
   static const String _prefKeyAppwriteEndpoint = 'appwrite_endpoint';
   static const String _prefKeyAppwriteProject = 'appwrite_project_id';
+  static const String _prefKeyProfileBucket = 'profile_bucket_id';
+  static const String _prefKeyMemoryLanesBucket = 'memory_lanes_bucket_id';
 
   static void resetToDefault() {
     baseUrl = defaultBaseUrl;
     appwriteEndpoint = defaultAppwriteEndpoint;
     appwriteProjectId = defaultAppwriteProjectId;
+    profileBucketId = defaultProfileBucketId;
+    memoryLanesBucketId = defaultMemoryLanesBucketId;
   }
 
   static Future<void> loadFromPrefs() async {
@@ -70,6 +92,20 @@ class AppConfig {
     } else {
       appwriteProjectId = defaultAppwriteProjectId;
     }
+
+    final savedProfileBucket = prefs.getString(_prefKeyProfileBucket);
+    if (savedProfileBucket != null && savedProfileBucket.isNotEmpty) {
+      profileBucketId = savedProfileBucket;
+    } else {
+      profileBucketId = defaultProfileBucketId;
+    }
+
+    final savedMemoryLanesBucket = prefs.getString(_prefKeyMemoryLanesBucket);
+    if (savedMemoryLanesBucket != null && savedMemoryLanesBucket.isNotEmpty) {
+      memoryLanesBucketId = savedMemoryLanesBucket;
+    } else {
+      memoryLanesBucketId = defaultMemoryLanesBucketId;
+    }
   }
 
   static Future<void> saveToPrefs() async {
@@ -77,6 +113,8 @@ class AppConfig {
     await prefs.setString(_prefKey, baseUrl);
     await prefs.setString(_prefKeyAppwriteEndpoint, appwriteEndpoint);
     await prefs.setString(_prefKeyAppwriteProject, appwriteProjectId);
+    await prefs.setString(_prefKeyProfileBucket, profileBucketId);
+    await prefs.setString(_prefKeyMemoryLanesBucket, memoryLanesBucketId);
   }
 }
 
@@ -224,13 +262,13 @@ class ApiService {
     try {
       try {
         await storage.deleteFile(
-          bucketId: '69538a24001337545e6b',
+          bucketId: AppConfig.profileBucketId,
           fileId: username,
         );
       } catch (_) {}
 
       await storage.createFile(
-        bucketId: '69538a24001337545e6b',
+        bucketId: AppConfig.profileBucketId,
         fileId: username,
         file: InputFile.fromPath(path: file.path, filename: '$username.avif'),
       );
@@ -1015,7 +1053,7 @@ class ApiService {
       }
 
       final result = await storage.createFile(
-        bucketId: '6957d8c0001c106bf6cf',
+        bucketId: AppConfig.memoryLanesBucketId,
         fileId: fileId,
         file: InputFile.fromPath(path: file.path, filename: fileId),
         permissions: permissions,
@@ -1029,7 +1067,7 @@ class ApiService {
   Future<void> deleteFile(String fileId) async {
     try {
       await storage.deleteFile(
-        bucketId: '6957d8c0001c106bf6cf',
+        bucketId: AppConfig.memoryLanesBucketId,
         fileId: fileId,
       );
     } catch (e) {

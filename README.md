@@ -14,16 +14,18 @@ Get into the community for insider news and updates: [Discord](https://discord.g
 Pre-register for release: [Google forms](https://docs.google.com/forms/d/e/1FAIpQLSdA6v4FyNCA9lzf_E-mPBP-PtF9ioedzijNrLCMPM9F_WuFgA/viewform?usp=header) (Google Play Pre-registration opens soon!)
 ## About
 ### Screenshots
-Click on any image to enlarge it.
-<table id="screenshots">
-	<tr>
-		<td><img src='screenshots/home.png' width='120'></td>
-		<td><img src='screenshots/timer.png' width='120'></td>
-		<td><img src='screenshots/habits.png' width='120'></td>
-		<td><img src='screenshots/aurapage.png' width='120'></td>
-        <td><img src='screenshots/shop.png' width='120'></td>
-	</tr>
-</table>
+
+<div align="center">
+  <p>
+    <img src="screenshots/home.png" width="30%" alt="Home" style="margin: 5px;">
+    <img src="screenshots/timer.png" width="30%" alt="Focus Timer" style="margin: 5px;">
+    <img src="screenshots/habits.png" width="30%" alt="Habits" style="margin: 5px;">
+  </p>
+  <p>
+    <img src="screenshots/aurapage.png" width="30%" alt="Aura Page" style="margin: 5px;">
+    <img src="screenshots/shop.png" width="30%" alt="Shop" style="margin: 5px;">
+  </p>
+</div>
 
 ### Features
 
@@ -45,25 +47,35 @@ Click on any image to enlarge it.
 
 ## Self-hosting
 
-If you wish to self-host AurAchieve for some reason, you'll have to clone and deploy the [backend](https://github.com/NiceSapien/AurAchieve-backend) repository, written in ExpressJS. The instructions to setup the backend are present in the repository readme.
+If you wish to self-host AurAchieve, you will need to clone and deploy the [backend](https://github.com/NiceSapien/AurAchieve-backend) repository, written in ExpressJS. The setup instructions for the backend are available in its repository's README.
 
-To setup the frontend, you can either build the apk with your server URL preset or you can use the official version and set your own URL. To do so, tap on the main intro screen (before signup/login) 7 times and a prompt to enter your server URL will open. Just enter it and you'll be connected to your own server. Alternatively if you'd like to build the APK yourself, follow these steps:
+To configure the official frontend app to connect to your self-hosted backend:
+1. Tap the main intro screen (before signing up or logging in) **7 times** to open the server URL configuration prompt.
+2. Enter your self-hosted server's root URL.
+3. The app will fetch configuration parameters from the server. Ensure that your backend returns the following JSON fields at the root endpoint:
+   - `appwriteEndpoint`: The URL of your Appwrite server.
+   - `appwriteProjectId`: Your Appwrite project ID.
+   - `memoryLanesBucketId`: The storage bucket ID used for memory lane file attachments.
+   - `profileBucketId`: The storage bucket ID used for profile pictures.
+4. **Validation Check**: The app will automatically connect to Appwrite and verify that the specified Project ID and both Storage Bucket IDs exist. If any bucket is missing or the project configuration is incorrect, the app will reject the connection and display a clear error message.
 
-1. Clone the repository
-2. Install flutter and download packages
+Alternatively, if you'd like to build the APK yourself with pre-configured defaults, follow these steps:
+
+1. Clone the repository.
+2. Install Flutter and get dependencies:
 
 ```bash
-pub get && flutter pub get
+flutter pub get
 ```
 
-3. Edit lib/api_service.dart with your own backend URL.
+3. Edit `lib/api_service.dart` and update the `defaultBaseUrl` in the `AppConfig` class with your own backend URL.
 
-4. Update lib/main.dart with you own appwrite project. Do **not** use AurAchieve's project ID, or your self hosted version won't work!
+4. Also update the default Appwrite settings in `lib/api_service.dart` (`defaultAppwriteEndpoint`, `defaultAppwriteProjectId`, `defaultProfileBucketId`, and `defaultMemoryLanesBucketId`) with your self-hosted credentials.
 
-5. Build. That's all.
+5. Build:
 
 ```bash
-flutter build apk --profile
+flutter build apk --release
 ```
 
 ## Contributing

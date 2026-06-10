@@ -525,10 +525,103 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
                     final Map<String, dynamic> data = jsonDecode(response.body);
                     final String? autoEndpoint = data['appwriteEndpoint'];
                     final String? autoProject = data['appwriteProjectId'];
+                    final String? autoMemoryLanesBucket =
+                        data['memoryLanesBucketId'];
+                    final String? autoProfileBucket = data['profileBucketId'];
 
                     if (autoEndpoint != null && autoProject != null) {
+                      // 1. Enforce bucket IDs for custom (self-hosted) instances
+                      final bool isCustomUrl = url != AppConfig.defaultBaseUrl;
+                      if (isCustomUrl &&
+                          (autoMemoryLanesBucket == null ||
+                              autoMemoryLanesBucket.isEmpty ||
+                              autoProfileBucket == null ||
+                              autoProfileBucket.isEmpty)) {
+                        setState(() {
+                          errorText =
+                              'The self-hosted server did not return the required storage bucket configurations. Please update your backend.';
+                          isLoading = false;
+                        });
+                        return;
+                      }
+
+                      // 2. Validate Appwrite configuration & bucket existence
+                      final testClient = appwrite.Client();
+                      testClient
+                          .setEndpoint(autoEndpoint)
+                          .setProject(autoProject)
+                          .setSelfSigned(status: true);
+                      final testStorage = appwrite.Storage(testClient);
+
+                      final profileBucket = autoProfileBucket ??
+                          AppConfig.defaultProfileBucketId;
+                      final memoryBucket = autoMemoryLanesBucket ??
+                          AppConfig.defaultMemoryLanesBucketId;
+
+                      // Validate profile bucket
+                      try {
+                        await testStorage.getFile(
+                          bucketId: profileBucket,
+                          fileId: 'nonexistent_test_file_id',
+                        );
+                      } on appwrite.AppwriteException catch (e) {
+                        if (e.type == 'project_not_found' ||
+                            e.type == 'project_unknown') {
+                          setState(() {
+                            errorText =
+                                'Appwrite Project ID is incorrect or not found.';
+                            isLoading = false;
+                          });
+                          return;
+                        }
+                        if (e.type == 'storage_bucket_not_found') {
+                          setState(() {
+                            errorText =
+                                'Profile picture storage bucket ($profileBucket) was not found. Please check your Appwrite configuration.';
+                            isLoading = false;
+                          });
+                          return;
+                        }
+                      } catch (e) {
+                        setState(() {
+                          errorText =
+                              'Could not connect to Appwrite endpoint: $e';
+                          isLoading = false;
+                        });
+                        return;
+                      }
+
+                      // Validate memory lanes bucket
+                      try {
+                        await testStorage.getFile(
+                          bucketId: memoryBucket,
+                          fileId: 'nonexistent_test_file_id',
+                        );
+                      } on appwrite.AppwriteException catch (e) {
+                        if (e.type == 'storage_bucket_not_found') {
+                          setState(() {
+                            errorText =
+                                'Memory lanes storage bucket ($memoryBucket) was not found. Please check your Appwrite configuration.';
+                            isLoading = false;
+                          });
+                          return;
+                        }
+                      } catch (e) {
+                        setState(() {
+                          errorText =
+                              'Could not connect to Appwrite endpoint: $e';
+                          isLoading = false;
+                        });
+                        return;
+                      }
+
                       AppConfig.setBaseUrl(url);
-                      AppConfig.setAppwriteConfig(autoEndpoint, autoProject);
+                      AppConfig.setAppwriteConfig(
+                        autoEndpoint,
+                        autoProject,
+                        memoryLanesBucket: autoMemoryLanesBucket,
+                        profileBucket: autoProfileBucket,
+                      );
                       await AppConfig.saveToPrefs();
 
                       widget.account.client

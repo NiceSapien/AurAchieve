@@ -17,6 +17,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import '../utils/crypto_utils.dart';
+import 'package:flutter_avif/flutter_avif.dart';
 
 class MemoryDetailPage extends StatefulWidget {
   final Map<String, dynamic> memory;
@@ -959,7 +960,7 @@ class _MediaItemState extends State<_MediaItem> {
   void initState() {
     super.initState();
     _url =
-        '${AppConfig.appwriteEndpoint}/storage/buckets/6957d8c0001c106bf6cf/files/${widget.fileId}/view?project=${AppConfig.appwriteProjectId}';
+        '${AppConfig.appwriteEndpoint}/storage/buckets/${AppConfig.memoryLanesBucketId}/files/${widget.fileId}/view?project=${AppConfig.appwriteProjectId}';
 
     if (widget.fileId.startsWith('image')) {
       _type = 'image';
@@ -992,7 +993,7 @@ class _MediaItemState extends State<_MediaItem> {
         final keyString = await secureStorage.read(key: 'memory_lanes_password');
         if (keyString != null && keyString.isNotEmpty) {
           final bytes = await widget.apiService!.storage.getFileView(
-            bucketId: '6957d8c0001c106bf6cf',
+            bucketId: AppConfig.memoryLanesBucketId,
             fileId: widget.fileId,
           );
           if (bytes.length > 16) {
@@ -1083,7 +1084,7 @@ class _MediaItemState extends State<_MediaItem> {
           _audioFile = _decryptedFile;
         } else if (widget.apiService != null) {
           final bytes = await widget.apiService!.storage.getFileView(
-            bucketId: '6957d8c0001c106bf6cf',
+            bucketId: AppConfig.memoryLanesBucketId,
             fileId: widget.fileId,
           );
           final dir = await getTemporaryDirectory();
@@ -1141,11 +1142,11 @@ class _MediaItemState extends State<_MediaItem> {
                 children: [
                   InteractiveViewer(
                     child: _isEncrypted && _decryptedFile != null
-                        ? Image.file(
+                        ? AvifImage.file(
                             _decryptedFile!,
                             fit: BoxFit.contain,
                           )
-                        : Image.network(
+                        : AvifImage.network(
                             _url,
                             headers: _headers,
                             fit: BoxFit.contain,
@@ -1167,13 +1168,13 @@ class _MediaItemState extends State<_MediaItem> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: _isEncrypted && _decryptedFile != null
-              ? Image.file(
+              ? AvifImage.file(
                   _decryptedFile!,
                   fit: BoxFit.cover,
                   width: 200,
                   height: 200,
                 )
-              : Image.network(
+              : AvifImage.network(
                   _url,
                   headers: _headers,
                   fit: BoxFit.cover,
