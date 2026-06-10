@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:app_links/app_links.dart';
 import 'screens/view_memory.dart';
+import 'screens/email_verification.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:appwrite/appwrite.dart' as appwrite;
@@ -252,18 +253,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           if (_themeMode == 'dark') mode = ThemeMode.dark;
         }
 
+        final baseTextTheme = GoogleFonts.gabaritoTextTheme();
+        final lightTheme = MaterialTheme(baseTextTheme).theme(lightColorScheme);
+        final darkTheme = MaterialTheme(baseTextTheme).theme(darkColorScheme);
+
         return MaterialApp(
           navigatorKey: navigatorKey,
-          theme: ThemeData(
-            colorScheme: lightColorScheme,
-            textTheme: GoogleFonts.gabaritoTextTheme(),
-            useMaterial3: true,
-          ),
-          darkTheme: ThemeData(
-            colorScheme: darkColorScheme,
-            textTheme: GoogleFonts.gabaritoTextTheme(),
-            useMaterial3: true,
-          ),
+          theme: lightTheme,
+          darkTheme: darkTheme,
           themeMode: mode,
           localizationsDelegates: const [
             GlobalMaterialLocalizations.delegate,
@@ -351,6 +348,9 @@ class _AuthCheckState extends State<AuthCheck> {
       );
     }
     if (loggedInUser != null) {
+      if (!loggedInUser!.emailVerification) {
+        return EmailVerificationScreen(account: widget.account);
+      }
       return HomePage(account: widget.account);
     }
     return AuraOnboarding(account: widget.account);
@@ -664,7 +664,12 @@ class _AuraOnboardingState extends State<AuraOnboarding> {
       if (!user.emailVerification) {
         if (mounted) {
           setState(() => isBusy = false);
-          await showEmailVerificationFlow(context, widget.account);
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => EmailVerificationScreen(account: widget.account),
+            ),
+          );
         }
         return;
       }
@@ -1454,217 +1459,7 @@ Future<void> showEmailVerificationFlow(
   BuildContext context,
   appwrite.Account account,
 ) async {
-  if (isVerificationDialogOpen) return;
-  isVerificationDialogOpen = true;
-
-  await showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (context) {
-      bool isLoading = true;
-      String? email;
-      bool emailSent = false;
-      bool checking = false;
-      bool canResend = false;
-
-      return StatefulBuilder(
-        builder: (context, setState) {
-          if (isLoading) {
-            account
-                .get()
-                .then((user) {
-                  if (context.mounted) {
-                    setState(() {
-                      email = user.email;
-                      isLoading = false;
-                    });
-                  }
-                })
-                .catchError((e) {
-                  if (context.mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Error: ${getFriendlyErrorMessage(e)}'),
-                      ),
-                    );
-                  }
-                });
-            return AlertDialog(
-              content: const SizedBox(
-                height: 50,
-                width: 50,
-                child: Center(child: CircularProgressIndicator()),
-              ),
-            );
-          }
-
-          if (checking) {
-            return AlertDialog(
-              content: const SizedBox(
-                height: 50,
-                width: 50,
-                child: Center(child: CircularProgressIndicator()),
-              ),
-            );
-          }
-
-          if (emailSent) {
-            return AlertDialog(
-              title: const Text('Verify your email'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [Text('Success - Verification sent to $email.')],
-              ),
-              actions: [
-                if (canResend)
-                  TextButton(
-                    onPressed: () async {
-                      setState(() {
-                        checking = true;
-                      });
-                      try {
-                        await account.createEmailVerification(
-                          url: 'https://aurachieve.web.app/verify',
-                        );
-                        if (context.mounted) {
-                          setState(() {
-                            checking = false;
-                            canResend = false;
-                          });
-                          Future.delayed(const Duration(seconds: 30), () {
-                            if (context.mounted) {
-                              setState(() {
-                                canResend = true;
-                              });
-                            }
-                          });
-                        }
-                      } catch (e) {
-                        if (context.mounted) {
-                          setState(() {
-                            checking = false;
-                          });
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Error: ${getFriendlyErrorMessage(e)}',
-                              ),
-                            ),
-                          );
-                        }
-                      }
-                    },
-                    child: const Text('Resend email'),
-                  ),
-                TextButton(
-                  onPressed: () async {
-                    setState(() {
-                      checking = true;
-                    });
-                    try {
-                      final user = await account.get();
-                      if (context.mounted) {
-                        if (user.emailVerification) {
-                          Navigator.pop(context);
-                          navigatorKey.currentState!.pushReplacement(
-                            MaterialPageRoute(
-                              builder: (context) => HomePage(account: account),
-                            ),
-                          );
-                        } else {
-                          setState(() {
-                            checking = false;
-                          });
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Email is still not verified.'),
-                            ),
-                          );
-                        }
-                      }
-                    } catch (e) {
-                      if (context.mounted) {
-                        setState(() {
-                          checking = false;
-                        });
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Error: ${getFriendlyErrorMessage(e)}',
-                            ),
-                          ),
-                        );
-                      }
-                    }
-                  },
-                  child: const Text('Continue'),
-                ),
-              ],
-            );
-          }
-
-          return AlertDialog(
-            title: const Text('Verify your email'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  "You need to verify your email to use AurAchieve. We'll send a link to the email below to verify it.",
-                ),
-                const SizedBox(height: 16),
-                Text(email ?? ''),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () async {
-                  setState(() {
-                    checking = true;
-                  });
-                  try {
-                    await account.createEmailVerification(
-                      url: 'https://aurachieve.web.app/verify',
-                    );
-                    if (context.mounted) {
-                      setState(() {
-                        emailSent = true;
-                        checking = false;
-                      });
-                      Future.delayed(const Duration(seconds: 30), () {
-                        if (context.mounted) {
-                          setState(() {
-                            canResend = true;
-                          });
-                        }
-                      });
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      setState(() {
-                        checking = false;
-                      });
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Error: ${getFriendlyErrorMessage(e)}'),
-                        ),
-                      );
-                    }
-                  }
-                },
-                child: const Text('Continue'),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
-  isVerificationDialogOpen = false;
+  EmailVerificationScreen.show(context, account);
 }
 
 String getFriendlyErrorMessage(dynamic e) {

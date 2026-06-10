@@ -19,6 +19,7 @@ import 'main.dart' show AuthCheck;
 import 'timer_page.dart';
 import 'study_planner.dart';
 import 'screens/extended_task_list.dart';
+import 'screens/email_verification.dart';
 import 'habits.dart';
 import 'widgets/habit_details_sheet.dart';
 import 'profile.dart';
@@ -1752,69 +1753,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              TextButton(
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(
-                    context,
-                  ).colorScheme.onPrimaryContainer,
-                ),
-                onPressed: _verificationResendCooldown > 0 || _isSendingVerification
-                    ? null
-                    : () async {
-                        setState(() => _isSendingVerification = true);
-                        try {
-                          await widget.account.createEmailVerification(
-                            url: 'https://aurachieve.com/verify',
-                          );
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Verification email sent'),
-                              ),
-                            );
-                            setState(() {
-                              _verificationResendCooldown = 30;
-                            });
-                            _verificationCooldownTimer?.cancel();
-                            _verificationCooldownTimer = Timer.periodic(
-                              const Duration(seconds: 1),
-                              (timer) {
-                                if (mounted) {
-                                  setState(() {
-                                    if (_verificationResendCooldown > 0) {
-                                      _verificationResendCooldown--;
-                                    } else {
-                                      timer.cancel();
-                                    }
-                                  });
-                                }
-                              },
-                            );
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(
-                              context,
-                            ).showSnackBar(SnackBar(content: Text('Error: $e')));
-                          }
-                        } finally {
-                          if (mounted) setState(() => _isSendingVerification = false);
-                        }
-                      },
-                child: _isSendingVerification
-                    ? SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Theme.of(context).colorScheme.onPrimaryContainer,
-                        ),
-                      )
-                    : Text(_verificationResendCooldown > 0
-                        ? 'Resend ($_verificationResendCooldown)'
-                        : 'Resend'),
-              ),
-              const SizedBox(width: 8),
               FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: Theme.of(
@@ -1822,50 +1760,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   ).colorScheme.onPrimaryContainer,
                   foregroundColor: Theme.of(context).colorScheme.primaryContainer,
                 ),
-                onPressed: _isCheckingVerification
-                    ? null
-                    : () async {
-                        setState(() => _isCheckingVerification = true);
-                        try {
-                          final user = await widget.account.get();
-                          if (context.mounted) {
-                            setState(() {
-                              _emailVerified = user.emailVerification;
-                            });
-                            if (_emailVerified) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Email verified successfully!'),
-                                ),
-                              );
-                              _fetchDataFromServer();
-                            } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Email is still not verified'),
-                                ),
-                              );
-                            }
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error: $e')),
-                            );
-                          }
-                        } finally {
-                          if (mounted) setState(() => _isCheckingVerification = false);
-                        }
-                      },
-                child: _isCheckingVerification
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : const Text('Verified'),
+                onPressed: () async {
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => EmailVerificationScreen(account: widget.account),
+                    ),
+                  );
+                  if (result == true && mounted) {
+                    setState(() {
+                      _emailVerified = true;
+                    });
+                    _fetchDataFromServer();
+                  }
+                },
+                child: const Text('Verify Now'),
               ),
             ],
           ),

@@ -14,6 +14,9 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:encrypt/encrypt.dart' as encrypt;
+import '../utils/crypto_utils.dart';
 
 class MemoryDetailPage extends StatefulWidget {
   final Map<String, dynamic> memory;
@@ -574,6 +577,8 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                         child: _MediaItem(
                           fileId: fileId,
                           apiService: widget.apiService,
+                          e2eEnabled: widget.e2eEnabled,
+                          isPublic: isPublic,
                         ),
                       );
                     },
@@ -924,7 +929,14 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
 class _MediaItem extends StatefulWidget {
   final String fileId;
   final ApiService? apiService;
-  const _MediaItem({required this.fileId, this.apiService});
+  final bool e2eEnabled;
+  final bool isPublic;
+  const _MediaItem({
+    required this.fileId,
+    this.apiService,
+    required this.e2eEnabled,
+    required this.isPublic,
+  });
 
   @override
   State<_MediaItem> createState() => _MediaItemState();
@@ -940,6 +952,8 @@ class _MediaItemState extends State<_MediaItem> {
   bool _isLoading = true;
   Map<String, String> _headers = {};
   File? _audioFile;
+  File? _decryptedFile;
+  bool _isEncrypted = false;
 
   @override
   void initState() {
@@ -957,6 +971,7 @@ class _MediaItemState extends State<_MediaItem> {
       _type = 'unknown';
     }
 
+    _isEncrypted = widget.e2eEnabled && !widget.isPublic;
     _initializeMedia();
   }
 
@@ -972,11 +987,90 @@ class _MediaItemState extends State<_MediaItem> {
         }
       }
 
+      if (_isEncrypted && widget.apiService != null) {
+        const secureStorage = FlutterSecureStorage();
+        final keyString = await secureStorage.read(key: 'memory_lanes_password');
+        if (keyString != null && keyString.isNotEmpty) {
+          final bytes = await widget.apiService!.storage.getFileView(
+            bucketId: '6957d8c0001c106bf6cf',
+            fileId: widget.fileId,
+          );
+          if (bytes.length > 16) {
+            List<int>? decrypted;
+            final ivBytes = bytes.sublist(0, 16);
+            final iv = encrypt.IV(ivBytes);
+            final encryptedBytes = bytes.sublist(16);
+
+            // 1. Try PBKDF2 decryption
+            try {
+              final key = derivePBKDF2Key(keyString);
+              final encrypter = encrypt.Encrypter(encrypt.AES(key));
+              decrypted = encrypter.decryptBytes(
+                encrypt.Encrypted(encryptedBytes),
+                iv: iv,
+              );
+
+              // Validate file signature/headers to ensure it's not garbage
+              bool isValid = false;
+              if (decrypted.length > 4) {
+                if (_type == 'image') {
+                  // WebP ('RIFF' = 82, 73, 70, 70) or JPEG (255, 216, 255) or PNG (137, 80, 78)
+                  if ((decrypted[0] == 82 && decrypted[1] == 73 && decrypted[2] == 70 && decrypted[3] == 70) ||
+                      (decrypted[0] == 255 && decrypted[1] == 216 && decrypted[2] == 255) ||
+                      (decrypted[0] == 137 && decrypted[1] == 80 && decrypted[2] == 78 && decrypted[3] == 71)) {
+                    isValid = true;
+                  }
+                } else if (_type == 'audio') {
+                  // Opus/Ogg ('OggS' = 79, 103, 103, 83) or AAC/ADTS (255, 241) or MPEG/MP3 (255, 251)
+                  if ((decrypted[0] == 79 && decrypted[1] == 103 && decrypted[2] == 103 && decrypted[3] == 83) ||
+                      (decrypted[0] == 255 && (decrypted[1] & 0xF0) == 0xF0)) {
+                    isValid = true;
+                  }
+                } else if (_type == 'video') {
+                  // MP4/HEVC (contains 'ftyp' at offset 4)
+                  if (decrypted.length > 8) {
+                    final isFtyp = (decrypted[4] == 102 && decrypted[5] == 116 && decrypted[6] == 121 && decrypted[7] == 112);
+                    if (isFtyp) isValid = true;
+                  }
+                }
+              }
+              if (!isValid) {
+                decrypted = null; // force fallback
+              }
+            } catch (_) {
+              decrypted = null;
+            }
+
+            // 2. Fallback to legacy key decryption
+            if (decrypted == null) {
+              try {
+                final key = getLegacyKey(keyString);
+                final encrypter = encrypt.Encrypter(encrypt.AES(key));
+                decrypted = encrypter.decryptBytes(
+                  encrypt.Encrypted(encryptedBytes),
+                  iv: iv,
+                );
+              } catch (_) {}
+            }
+
+            if (decrypted != null) {
+              final dir = await getTemporaryDirectory();
+              _decryptedFile = File('${dir.path}/dec_${widget.fileId}');
+              await _decryptedFile!.writeAsBytes(decrypted);
+            }
+          }
+        }
+      }
+
       if (_type == 'video') {
-        _videoController = VideoPlayerController.networkUrl(
-          Uri.parse(_url),
-          httpHeaders: _headers,
-        );
+        if (_isEncrypted && _decryptedFile != null) {
+          _videoController = VideoPlayerController.file(_decryptedFile!);
+        } else {
+          _videoController = VideoPlayerController.networkUrl(
+            Uri.parse(_url),
+            httpHeaders: _headers,
+          );
+        }
         await _videoController!.initialize();
         _chewieController = ChewieController(
           videoPlayerController: _videoController!,
@@ -985,7 +1079,9 @@ class _MediaItemState extends State<_MediaItem> {
           aspectRatio: _videoController!.value.aspectRatio,
         );
       } else if (_type == 'audio') {
-        if (widget.apiService != null) {
+        if (_isEncrypted && _decryptedFile != null) {
+          _audioFile = _decryptedFile;
+        } else if (widget.apiService != null) {
           final bytes = await widget.apiService!.storage.getFileView(
             bucketId: '6957d8c0001c106bf6cf',
             fileId: widget.fileId,
@@ -1044,11 +1140,16 @@ class _MediaItemState extends State<_MediaItem> {
                 alignment: Alignment.center,
                 children: [
                   InteractiveViewer(
-                    child: Image.network(
-                      _url,
-                      headers: _headers,
-                      fit: BoxFit.contain,
-                    ),
+                    child: _isEncrypted && _decryptedFile != null
+                        ? Image.file(
+                            _decryptedFile!,
+                            fit: BoxFit.contain,
+                          )
+                        : Image.network(
+                            _url,
+                            headers: _headers,
+                            fit: BoxFit.contain,
+                          ),
                   ),
                   Positioned(
                     top: 16,
@@ -1065,28 +1166,35 @@ class _MediaItemState extends State<_MediaItem> {
         },
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: Image.network(
-            _url,
-            headers: _headers,
-            fit: BoxFit.cover,
-            width: 200,
-            height: 200,
-            loadingBuilder: (ctx, child, progress) {
-              if (progress == null) return child;
-              return Container(
-                width: 200,
-                height: 200,
-                color: colorScheme.surfaceContainerHigh,
-                child: const Center(child: CircularProgressIndicator()),
-              );
-            },
-            errorBuilder: (ctx, err, stack) => Container(
-              width: 200,
-              height: 200,
-              color: colorScheme.surfaceContainerHigh,
-              child: const Icon(Icons.broken_image),
-            ),
-          ),
+          child: _isEncrypted && _decryptedFile != null
+              ? Image.file(
+                  _decryptedFile!,
+                  fit: BoxFit.cover,
+                  width: 200,
+                  height: 200,
+                )
+              : Image.network(
+                  _url,
+                  headers: _headers,
+                  fit: BoxFit.cover,
+                  width: 200,
+                  height: 200,
+                  loadingBuilder: (ctx, child, progress) {
+                    if (progress == null) return child;
+                    return Container(
+                      width: 200,
+                      height: 200,
+                      color: colorScheme.surfaceContainerHigh,
+                      child: const Center(child: CircularProgressIndicator()),
+                    );
+                  },
+                  errorBuilder: (ctx, err, stack) => Container(
+                    width: 200,
+                    height: 200,
+                    color: colorScheme.surfaceContainerHigh,
+                    child: const Icon(Icons.broken_image),
+                  ),
+                ),
         ),
       );
     } else if (_type == 'video') {

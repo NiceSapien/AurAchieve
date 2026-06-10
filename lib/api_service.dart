@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'main.dart';
+import 'screens/email_verification.dart';
 
 dynamic _parseJson(String jsonString) {
   return jsonDecode(jsonString);
@@ -152,7 +153,7 @@ class ApiService {
     if (response.statusCode == 403) {
       final context = navigatorKey.currentContext;
       if (context != null) {
-        showEmailVerificationFlow(context, account);
+        EmailVerificationScreen.show(context, account);
       }
       throw Exception('Forbidden: Email not verified.');
     }
@@ -231,7 +232,7 @@ class ApiService {
       await storage.createFile(
         bucketId: '69538a24001337545e6b',
         fileId: username,
-        file: InputFile.fromPath(path: file.path, filename: '$username.webp'),
+        file: InputFile.fromPath(path: file.path, filename: '$username.avif'),
       );
     } catch (e) {
       throw Exception('Failed to upload profile picture: $e');

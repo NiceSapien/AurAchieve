@@ -137,7 +137,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
     try {
       final tempDir = Directory.systemTemp;
-      final targetPath = '${tempDir.path}/temp_pfp.webp';
+      final targetPath = '${tempDir.path}/temp_pfp.avif';
 
       final targetFile = File(targetPath);
       if (await targetFile.exists()) {

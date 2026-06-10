@@ -62,7 +62,7 @@ jobs:
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: debug-apk
+          name: profile-apk
           path: build/app/outputs/flutter-apk/app-profile.apk
   
   #----------------------------------------------------
@@ -70,7 +70,7 @@ jobs:
   #----------------------------------------------------
   build_ios:
    name: Build Flutter (iOS)
-   runs-on: macos-14
+   runs-on: macos-26
    steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -85,7 +85,7 @@ jobs:
 
     - name: Build Flutter iOS (Profile - No Code Signing)
       # This command places the .app bundle at build/ios/iphoneos/Runner.app
-      run: flutter build ios --profile --no-codesign
+      run: flutter build ios --profile --no-codesign --xcconfig-overrides=ios/Flutter/Release.xcconfig DEVELOPMENT_TEAM="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
     - name: Package .app into .ipa (Unsigned)
       run: |

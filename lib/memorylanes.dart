@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 import 'screens/create_memory.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
+import 'utils/crypto_utils.dart';
 import 'screens/view_memory.dart';
 import 'utils/draft_utils.dart';
 import 'lock.dart';
@@ -107,10 +108,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
       if (_localE2eStatus == 'true' &&
           _unlockPasswordController.text.isNotEmpty) {
         bool badPassword = false;
-        final key = encrypt.Key.fromUtf8(
-          _unlockPasswordController.text.padRight(32).substring(0, 32),
-        );
-        final encrypter = encrypt.Encrypter(encrypt.AES(key));
 
         String decryptField(String text) {
           if (badPassword) return text;
@@ -119,7 +116,22 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
               final parts = text.split(':');
               if (parts.length == 2) {
                 final iv = encrypt.IV.fromBase64(parts[0]);
-                return encrypter.decrypt64(parts[1], iv: iv);
+                final ciphertext = parts[1];
+
+                // 1. Try PBKDF2 decryption
+                try {
+                  final key = derivePBKDF2Key(_unlockPasswordController.text);
+                  final encrypter = encrypt.Encrypter(encrypt.AES(key));
+                  final decrypted = encrypter.decrypt64(ciphertext, iv: iv);
+                  if (decrypted.startsWith('{"') || decrypted.startsWith('[') || !decrypted.contains('\x00')) {
+                    return decrypted;
+                  }
+                } catch (_) {}
+
+                // 2. Fallback to legacy decryption
+                final key = getLegacyKey(_unlockPasswordController.text);
+                final encrypter = encrypt.Encrypter(encrypt.AES(key));
+                return encrypter.decrypt64(ciphertext, iv: iv);
               }
             }
             return text;
@@ -273,6 +285,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
         final cached = await _storage.read(key: 'memory_lanes_password');
         if (cached != null) {
           _unlockPasswordController.text = cached;
+          await prewarmPBKDF2Key(cached);
           _unlock();
         }
       } else {
@@ -330,10 +343,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
       if (_localE2eStatus == 'true' &&
           _unlockPasswordController.text.isNotEmpty) {
         bool badPassword = false;
-        final key = encrypt.Key.fromUtf8(
-          _unlockPasswordController.text.padRight(32).substring(0, 32),
-        );
-        final encrypter = encrypt.Encrypter(encrypt.AES(key));
 
         String decryptField(String text) {
           if (badPassword) return text;
@@ -342,7 +351,22 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
               final parts = text.split(':');
               if (parts.length == 2) {
                 final iv = encrypt.IV.fromBase64(parts[0]);
-                return encrypter.decrypt64(parts[1], iv: iv);
+                final ciphertext = parts[1];
+
+                // 1. Try PBKDF2 decryption
+                try {
+                  final key = derivePBKDF2Key(_unlockPasswordController.text);
+                  final encrypter = encrypt.Encrypter(encrypt.AES(key));
+                  final decrypted = encrypter.decrypt64(ciphertext, iv: iv);
+                  if (decrypted.startsWith('{"') || decrypted.startsWith('[') || !decrypted.contains('\x00')) {
+                    return decrypted;
+                  }
+                } catch (_) {}
+
+                // 2. Fallback to legacy decryption
+                final key = getLegacyKey(_unlockPasswordController.text);
+                final encrypter = encrypt.Encrypter(encrypt.AES(key));
+                return encrypter.decrypt64(ciphertext, iv: iv);
               }
             }
             return text;
@@ -428,10 +452,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
           if (_localE2eStatus == 'true' &&
               _unlockPasswordController.text.isNotEmpty) {
             bool badPassword = false;
-            final key = encrypt.Key.fromUtf8(
-              _unlockPasswordController.text.padRight(32).substring(0, 32),
-            );
-            final encrypter = encrypt.Encrypter(encrypt.AES(key));
 
             String decryptField(String text) {
               if (badPassword) return text;
@@ -440,7 +460,22 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                   final parts = text.split(':');
                   if (parts.length == 2) {
                     final iv = encrypt.IV.fromBase64(parts[0]);
-                    return encrypter.decrypt64(parts[1], iv: iv);
+                    final ciphertext = parts[1];
+
+                    // 1. Try PBKDF2 decryption
+                    try {
+                      final key = derivePBKDF2Key(_unlockPasswordController.text);
+                      final encrypter = encrypt.Encrypter(encrypt.AES(key));
+                      final decrypted = encrypter.decrypt64(ciphertext, iv: iv);
+                      if (decrypted.startsWith('{"') || decrypted.startsWith('[') || !decrypted.contains('\x00')) {
+                        return decrypted;
+                      }
+                    } catch (_) {}
+
+                    // 2. Fallback to legacy decryption
+                    final key = getLegacyKey(_unlockPasswordController.text);
+                    final encrypter = encrypt.Encrypter(encrypt.AES(key));
+                    return encrypter.decrypt64(ciphertext, iv: iv);
                   }
                 }
                 return text;
@@ -712,11 +747,20 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
             FilledButton(
               onPressed: () async {
                 if (_unlockPasswordController.text.isNotEmpty) {
-                  await _storage.write(
-                    key: 'memory_lanes_password',
-                    value: _unlockPasswordController.text,
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (context) => const Center(child: CircularProgressIndicator()),
                   );
-                  _unlock();
+                  await prewarmPBKDF2Key(_unlockPasswordController.text);
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    await _storage.write(
+                      key: 'memory_lanes_password',
+                      value: _unlockPasswordController.text,
+                    );
+                    _unlock();
+                  }
                 }
               },
               child: const Text('Unlock'),
@@ -2263,6 +2307,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                     await widget.apiService.setupMemoryLanes(e2e: _e2eEnabled);
 
                     if (_e2eEnabled) {
+                      await prewarmPBKDF2Key(_passwordController.text);
                       await _storage.write(
                         key: 'memory_lanes_password',
                         value: _passwordController.text,

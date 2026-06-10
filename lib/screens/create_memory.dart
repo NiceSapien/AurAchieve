@@ -17,6 +17,7 @@ import 'package:emoji_picker_flutter/emoji_picker_flutter.dart' as emoji_picker;
 import 'package:uuid/uuid.dart';
 import '../api_service.dart';
 import '../utils/draft_utils.dart';
+import '../utils/crypto_utils.dart';
 import 'package:http/http.dart' as http;
 
 class CreateMemoryPage extends StatefulWidget {
@@ -319,34 +320,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
     }
   }
 
-  Future<void> _checkE2EWarning() async {
-    if (widget.e2eEnabled) {
-      await showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(
-            'Encryption Warning',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-          ),
-          content: Text(
-            'Media attachments (images, videos, audio) are NOT encrypted.',
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('I Understand'),
-            ),
-          ],
-        ),
-      );
-    }
-  }
-
   Future<void> _pickImage() async {
-    await _checkE2EWarning();
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery);
     if (picked != null) {
@@ -354,7 +328,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
 
       final dir = await getTemporaryDirectory();
       final targetPath =
-          '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.webp';
+          '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.avif';
       final result = await FlutterImageCompress.compressAndGetFile(
         file.absolute.path,
         targetPath,
@@ -371,25 +345,23 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   }
 
   Future<void> _pickVideo() async {
-    await _checkE2EWarning();
     final picker = ImagePicker();
     final picked = await picker.pickVideo(source: ImageSource.gallery);
     if (picked != null) {
       final file = File(picked.path);
-      if (!file.path.toLowerCase().endsWith('.mp4')) {
-        _showError('Only .mp4 videos are allowed');
-        return;
-      }
+      final dir = await getTemporaryDirectory();
+      final tempFile = File(
+        '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.hevc',
+      );
+      await file.copy(tempFile.path);
       setState(() {
-        _mediaFiles.add(file);
+        _mediaFiles.add(tempFile);
         _mediaTypes.add('video');
       });
     }
   }
 
   Future<void> _showRecordingDialog() async {
-    await _checkE2EWarning();
-
     final file = await showDialog<File>(
       context: context,
       barrierDismissible: false,
@@ -420,6 +392,12 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
 
     setState(() => _isSaving = true);
     try {
+      String? keyString;
+      if (widget.e2eEnabled && !_isPublic) {
+        const storage = FlutterSecureStorage();
+        keyString = await storage.read(key: 'memory_lanes_password');
+      }
+
       List<String> fileIds = List.from(_existingFileIds);
       for (int i = 0; i < _mediaFiles.length; i++) {
         final file = _mediaFiles[i];
@@ -429,12 +407,40 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
         String name = '${type}_$timestamp.$ext';
         name = name.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '');
 
+        File fileToUpload = file;
+        File? tempEncryptedFile;
+
+        if (keyString != null && keyString.isNotEmpty) {
+          final key = derivePBKDF2Key(keyString);
+          final encrypter = encrypt.Encrypter(encrypt.AES(key));
+          final iv = encrypt.IV.fromLength(16);
+          final fileBytes = await file.readAsBytes();
+          final encrypted = encrypter.encryptBytes(fileBytes, iv: iv);
+
+          final dir = await getTemporaryDirectory();
+          tempEncryptedFile = File(
+            '${dir.path}/enc_${DateTime.now().millisecondsSinceEpoch}_$name',
+          );
+          final writer = await tempEncryptedFile.open(mode: FileMode.write);
+          await writer.writeFrom(iv.bytes);
+          await writer.writeFrom(encrypted.bytes);
+          await writer.close();
+
+          fileToUpload = tempEncryptedFile;
+        }
+
         final id = await widget.apiService.uploadMemoryFile(
-          file,
+          fileToUpload,
           name,
           isPublic: _isPublic,
         );
         fileIds.add(id);
+
+        if (tempEncryptedFile != null) {
+          try {
+            await tempEncryptedFile.delete();
+          } catch (_) {}
+        }
       }
 
       final delta = _quillController.document.toDelta();
@@ -450,27 +456,21 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
       String? tagColor = _selectedColor;
       String? mood = _selectedMood;
 
-      if (widget.e2eEnabled && !_isPublic) {
-        const storage = FlutterSecureStorage();
-        final keyString = await storage.read(key: 'memory_lanes_password');
-        if (keyString != null && keyString.isNotEmpty) {
-          final key = encrypt.Key.fromUtf8(
-            keyString.padRight(32).substring(0, 32),
-          );
-          final encrypter = encrypt.Encrypter(encrypt.AES(key));
+      if (keyString != null && keyString.isNotEmpty) {
+        final key = derivePBKDF2Key(keyString);
+        final encrypter = encrypt.Encrypter(encrypt.AES(key));
 
-          String encryptField(String text) {
-            final iv = encrypt.IV.fromLength(16);
-            final encrypted = encrypter.encrypt(text, iv: iv);
-            return '${iv.base64}:${encrypted.base64}';
-          }
-
-          description = encryptField(description);
-          name = encryptField(name);
-          if (tag != null) tag = encryptField(tag);
-          tagColor = encryptField(tagColor);
-          if (mood != null) mood = encryptField(mood);
+        String encryptField(String text) {
+          final iv = encrypt.IV.fromLength(16);
+          final encrypted = encrypter.encrypt(text, iv: iv);
+          return '${iv.base64}:${encrypted.base64}';
         }
+
+        description = encryptField(description);
+        name = encryptField(name);
+        if (tag != null) tag = encryptField(tag);
+        tagColor = encryptField(tagColor);
+        if (mood != null) mood = encryptField(mood);
       }
 
       if (widget.existingMemory != null) {
@@ -1926,10 +1926,10 @@ class _RecordingDialogState extends State<RecordingDialog> {
     if (await _audioRecorder.hasPermission()) {
       final dir = await getTemporaryDirectory();
 
-      _path = '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.mp3';
+      _path = '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.opus';
 
       await _audioRecorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc),
+        const RecordConfig(encoder: AudioEncoder.opus),
         path: _path!,
       );
 
