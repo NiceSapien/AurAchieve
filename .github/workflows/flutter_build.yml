@@ -23,7 +23,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '24'
+          java-version: '17'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -85,7 +85,7 @@ jobs:
 
     - name: Build Flutter iOS (Profile - No Code Signing)
       # This command places the .app bundle at build/ios/iphoneos/Runner.app
-      run: flutter build ios --profile --no-codesign --xcconfig-overrides=ios/Flutter/Release.xcconfig DEVELOPMENT_TEAM="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+      run: flutter build ios --profile --no-codesign
 
     - name: Package .app into .ipa (Unsigned)
       run: |
