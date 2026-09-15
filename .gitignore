@@ -45,3 +45,5 @@ app.*.map.json
 /android/app/release
 AuraAscend-backend-main
 script.py
+sentry.properties
+sentry-wizard

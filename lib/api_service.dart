@@ -52,8 +52,8 @@ class AppConfig {
         : defaultProfileBucketId;
     memoryLanesBucketId =
         (memoryLanesBucket != null && memoryLanesBucket.isNotEmpty)
-            ? memoryLanesBucket
-            : defaultMemoryLanesBucketId;
+        ? memoryLanesBucket
+        : defaultMemoryLanesBucketId;
   }
 
   static const String _prefKey = 'api_base_url';
@@ -189,11 +189,14 @@ class ApiService {
     }
 
     if (response.statusCode == 403) {
-      final context = navigatorKey.currentContext;
-      if (context != null) {
-        EmailVerificationScreen.show(context, account);
+      final body = response.body.toLowerCase();
+      if (body.contains('email') && (body.contains('verif') || body.contains('not verified'))) {
+        final context = navigatorKey.currentContext;
+        if (context != null) {
+          EmailVerificationScreen.show(context, account);
+        }
+        throw Exception('Forbidden: Email not verified.');
       }
-      throw Exception('Forbidden: Email not verified.');
     }
 
     return response;
@@ -967,6 +970,149 @@ class ApiService {
     }
   }
 
+  Future<void> savePublicKey(String publicKey) async {
+    final response = await _performRequest(
+      'PUT',
+      '/api/user/public-key',
+      body: jsonEncode({'publicKey': publicKey}),
+    );
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception('Failed to save public key: ${response.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> searchUser(String email) async {
+    final cleanEmail = email.trim();
+    final encoded = Uri.encodeComponent(cleanEmail);
+    final response = await _performRequest(
+      'GET',
+      '/api/users/by-email-or-username?email=$encoded',
+    );
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        if (decoded['user'] is Map) {
+          return Map<String, dynamic>.from(decoded['user']);
+        }
+        if (decoded['data'] is Map) {
+          return Map<String, dynamic>.from(decoded['data']);
+        }
+        if (decoded['users'] is List && (decoded['users'] as List).isNotEmpty) {
+          return Map<String, dynamic>.from(decoded['users'][0]);
+        }
+        return decoded;
+      } else if (decoded is List && decoded.isNotEmpty) {
+        return Map<String, dynamic>.from(decoded.first as Map);
+      }
+      throw Exception('User not found');
+    } else {
+      final bodyMsg = response.body.isNotEmpty ? response.body : 'Status ${response.statusCode}';
+      throw Exception('User not found: $bodyMsg');
+    }
+  }
+
+
+  Future<List<dynamic>> getLaneMembers(String laneId) async {
+    final response = await _performRequest(
+      'GET',
+      '/api/memory-lanes/lanes/$laneId/members',
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as List<dynamic>;
+    } else {
+      throw Exception('Failed to load lane members: ${response.body}');
+    }
+  }
+
+  Future<List<dynamic>> getLanes() async {
+    final response = await _performRequest('GET', '/api/memory-lanes/lanes');
+    if (response.statusCode == 200) {
+      final decoded = await compute(_parseJson, response.body);
+      if (decoded is List) return decoded;
+      if (decoded is Map && decoded['lanes'] is List) return decoded['lanes'];
+      return [];
+    } else {
+      throw Exception('Failed to load memory lanes: ${response.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> createLane({
+    required String name,
+    required bool isE2e,
+  }) async {
+    final response = await _performRequest(
+      'POST',
+      '/api/memory-lanes/lanes',
+      body: jsonEncode({'name': name, 'isE2e': isE2e}),
+    );
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to create lane: ${response.body}');
+    }
+  }
+
+  Future<void> inviteToLane(String laneId, String memberId) async {
+    final response = await _performRequest(
+      'POST',
+      '/api/memory-lanes/lanes/$laneId/members',
+      body: jsonEncode({'memberId': memberId}),
+    );
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception('Failed to invite member: ${response.body}');
+    }
+  }
+
+  Future<void> deleteLane(String laneId) async {
+    final response = await _performRequest(
+      'DELETE',
+      '/api/memory-lanes/lanes/$laneId',
+    );
+    if (response.statusCode != 200 && response.statusCode != 204) {
+      throw Exception('Failed to delete lane: ${response.body}');
+    }
+  }
+
+  Future<void> leaveLane(String laneId) async {
+    final response = await _performRequest(
+      'DELETE',
+      '/api/memory-lanes/lanes/$laneId/leave',
+    );
+    if (response.statusCode != 200 && response.statusCode != 204) {
+      throw Exception('Failed to leave lane: ${response.body}');
+    }
+  }
+
+  Future<void> saveLaneKey(
+    String laneId,
+    String targetUserId,
+    String encryptedLaneKey,
+  ) async {
+    final response = await _performRequest(
+      'POST',
+      '/api/memory-lanes/lanes/$laneId/keys',
+      body: jsonEncode({
+        'targetUserId': targetUserId,
+        'encryptedLaneKey': encryptedLaneKey,
+      }),
+    );
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception('Failed to save lane key: ${response.body}');
+    }
+  }
+
+  Future<String?> getLaneKey(String laneId) async {
+    final response = await _performRequest(
+      'GET',
+      '/api/memory-lanes/lanes/$laneId/keys',
+    );
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      return decoded['encryptedLaneKey'];
+    }
+    return null;
+  }
+
   Future<Map<String, dynamic>> createMemory({
     required String name,
     required String description,
@@ -976,6 +1122,7 @@ class ApiService {
     String? mood,
     String? createdAt,
     List<String>? files,
+    String? laneId,
   }) async {
     final body = {
       'name': name,
@@ -987,6 +1134,7 @@ class ApiService {
     if (tagColor != null) body['tagColor'] = tagColor;
     if (mood != null) body['mood'] = mood;
     if (files != null) body['files'] = files;
+    if (laneId != null) body['laneId'] = laneId;
 
     final response = await _performRequest(
       'POST',
@@ -1011,6 +1159,7 @@ class ApiService {
     String? mood,
     String? createdAt,
     List<String>? files,
+    String? laneId,
   }) async {
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
@@ -1021,6 +1170,7 @@ class ApiService {
     if (tagColor != null) body['tagColor'] = tagColor;
     if (mood != null) body['mood'] = mood;
     if (files != null) body['files'] = files;
+    if (laneId != null) body['laneId'] = laneId;
 
     final response = await _performRequest(
       'PUT',
@@ -1075,7 +1225,11 @@ class ApiService {
     }
   }
 
-  Future<void> deleteMemory(String memoryId, {List<String>? fileIds}) async {
+  Future<void> deleteMemory(
+    String memoryId, {
+    List<String>? fileIds,
+    String? laneId,
+  }) async {
     if (fileIds != null) {
       for (final fileId in fileIds) {
         try {
@@ -1086,7 +1240,10 @@ class ApiService {
       }
     }
 
-    final endpoint = '/api/memory-lanes/$memoryId';
+    var endpoint = '/api/memory-lanes/$memoryId';
+    if (laneId != null) {
+      endpoint += '?laneId=$laneId';
+    }
     final response = await _performRequest('DELETE', endpoint);
     if (response.statusCode == 200) return;
     if (response.statusCode == 404) throw Exception('Memory not found');
@@ -1107,9 +1264,16 @@ class ApiService {
     }
   }
 
-  Future<Map<String, dynamic>> getMemories({int? length, int? offset}) async {
+  Future<Map<String, dynamic>> getMemories({
+    String? laneId,
+    int? length,
+    int? offset,
+  }) async {
     String endpoint = '/api/memory-lanes';
     final queryParams = <String>[];
+    if (laneId != null) {
+      queryParams.add('laneId=$laneId');
+    }
     if (length != null) {
       queryParams.add('length=$length');
     }

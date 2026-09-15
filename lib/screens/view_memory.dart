@@ -512,7 +512,7 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                             throw Exception('API service unavailable');
                           }
 
-                          await widget.apiService!.deleteMemory(id);
+                          await widget.apiService!.deleteMemory(id, laneId: widget.memory['laneId']?.toString());
                           if (context.mounted && Navigator.canPop(context)) {
                             Navigator.of(context).pop(true);
                           }
@@ -533,6 +533,7 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                             apiService: widget.apiService!,
                             existingMemory: widget.memory,
                             e2eEnabled: widget.e2eEnabled,
+                            laneId: widget.memory['laneId']?.toString(),
                           ),
                         ),
                       );
@@ -580,6 +581,7 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                           apiService: widget.apiService,
                           e2eEnabled: widget.e2eEnabled,
                           isPublic: isPublic,
+                          laneId: widget.memory['laneId']?.toString(),
                         ),
                       );
                     },
@@ -932,11 +934,13 @@ class _MediaItem extends StatefulWidget {
   final ApiService? apiService;
   final bool e2eEnabled;
   final bool isPublic;
+  final String? laneId;
   const _MediaItem({
     required this.fileId,
     this.apiService,
     required this.e2eEnabled,
     required this.isPublic,
+    this.laneId,
   });
 
   @override
@@ -990,7 +994,12 @@ class _MediaItemState extends State<_MediaItem> {
 
       if (_isEncrypted && widget.apiService != null) {
         const secureStorage = FlutterSecureStorage();
-        final keyString = await secureStorage.read(key: 'memory_lanes_password');
+        String? keyString;
+        if (widget.laneId != null) {
+          keyString = await secureStorage.read(key: 'memory_lanes_password_${widget.laneId}');
+        } else {
+          keyString = await secureStorage.read(key: 'memory_lanes_password');
+        }
         if (keyString != null && keyString.isNotEmpty) {
           final bytes = await widget.apiService!.storage.getFileView(
             bucketId: AppConfig.memoryLanesBucketId,

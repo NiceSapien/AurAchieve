@@ -41,6 +41,9 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   bool _isUnlocked = false;
   bool _isLoadingMemories = false;
   List<dynamic> _memories = [];
+  List<dynamic> _lanes = [];
+  Map<String, dynamic>? _activeLane;
+  String? _currentUserId;
   final _storage = const FlutterSecureStorage();
   final _unlockPasswordController = TextEditingController();
 
@@ -98,15 +101,21 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     });
     try {
       final nextOffset = _currentOffset + _pageSize;
+      final laneId = _activeLane?['id']?.toString();
       final response = await widget.apiService.getMemories(
+        laneId: laneId,
         length: 100,
         offset: nextOffset,
       );
       final newMemories = response['documents'] as List<dynamic>? ?? [];
       _totalMemories = response['total'] ?? _totalMemories;
 
-      if (_localE2eStatus == 'true' &&
-          _unlockPasswordController.text.isNotEmpty) {
+      final activeLaneE2e = _activeLane?['isE2e'] == true;
+      final activeKeyString = activeLaneE2e
+          ? await _getActiveLaneKey(laneId)
+          : null;
+
+      if (activeLaneE2e && activeKeyString != null) {
         bool badPassword = false;
 
         String decryptField(String text) {
@@ -120,16 +129,18 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
 
                 // 1. Try PBKDF2 decryption
                 try {
-                  final key = derivePBKDF2Key(_unlockPasswordController.text);
+                  final key = derivePBKDF2Key(activeKeyString);
                   final encrypter = encrypt.Encrypter(encrypt.AES(key));
                   final decrypted = encrypter.decrypt64(ciphertext, iv: iv);
-                  if (decrypted.startsWith('{"') || decrypted.startsWith('[') || !decrypted.contains('\x00')) {
+                  if (decrypted.startsWith('{"') ||
+                      decrypted.startsWith('[') ||
+                      !decrypted.contains('\x00')) {
                     return decrypted;
                   }
                 } catch (_) {}
 
                 // 2. Fallback to legacy decryption
-                final key = getLegacyKey(_unlockPasswordController.text);
+                final key = getLegacyKey(activeKeyString);
                 final encrypter = encrypt.Encrypter(encrypt.AES(key));
                 return encrypter.decrypt64(ciphertext, iv: iv);
               }
@@ -162,11 +173,10 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
         }
 
         if (badPassword) {
-          await _storage.delete(key: 'memory_lanes_password');
+          await _storage.delete(key: 'memory_lanes_password_$laneId');
           if (mounted) {
             setState(() {
               _isUnlocked = false;
-              _unlockPasswordController.clear();
               _isDeepSearching = false;
             });
             ScaffoldMessenger.of(context).showSnackBar(
@@ -240,6 +250,12 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   void initState() {
     super.initState();
     _localE2eStatus = widget.e2eStatus;
+    _activeLane = {
+      'id': null,
+      'name': 'Personal',
+      'isE2e': _localE2eStatus == 'true',
+    };
+    _lanes = [_activeLane!];
     _introController = AnimationController(vsync: this);
     _scrollController.addListener(_onScroll);
     _checkInitialState();
@@ -269,7 +285,1052 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     }
   }
 
+  Future<void> _setupRsaKeyPair() async {
+    try {
+      String? localPrivateKey = await _storage.read(
+        key: 'memory_lanes_private_key',
+      );
+      String? localPublicKey = await _storage.read(
+        key: 'memory_lanes_public_key',
+      );
+
+      final profile = await widget.apiService.getUserProfile();
+      final serverPublicKey = profile['publicKey'];
+
+      if (localPrivateKey == null ||
+          localPublicKey == null ||
+          serverPublicKey == null ||
+          serverPublicKey.isEmpty) {
+        final keyPair = generateRSAKeyPair();
+        final pubJson = encodePublicKey(keyPair.publicKey);
+        final privJson = encodePrivateKey(keyPair.privateKey);
+
+        await _storage.write(key: 'memory_lanes_private_key', value: privJson);
+        await _storage.write(key: 'memory_lanes_public_key', value: pubJson);
+
+        await widget.apiService.savePublicKey(pubJson);
+      }
+    } catch (e) {
+      debugPrint('Error setting up RSA keys: $e');
+    }
+  }
+
+  Future<String?> _getActiveLaneKey(String? laneId) async {
+    if (laneId == null) {
+      return _unlockPasswordController.text;
+    }
+    String? key = await _storage.read(key: 'memory_lanes_password_$laneId');
+    if (key != null && key.isNotEmpty) return key;
+
+    try {
+      final encryptedKey = await widget.apiService.getLaneKey(laneId);
+      if (encryptedKey != null) {
+        final privateKeyJson = await _storage.read(
+          key: 'memory_lanes_private_key',
+        );
+        if (privateKeyJson != null) {
+          final decryptedKey = decryptLaneKeyWithJsonPrivateKey(
+            encryptedKey,
+            privateKeyJson,
+          );
+          await _storage.write(
+            key: 'memory_lanes_password_$laneId',
+            value: decryptedKey,
+          );
+          await prewarmPBKDF2Key(decryptedKey);
+          return decryptedKey;
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to resolve active lane key: $e');
+    }
+    return null;
+  }
+
+  Future<void> _fetchLanes() async {
+    try {
+      final fetched = await widget.apiService.getLanes();
+      if (_currentUserId == null) {
+        try {
+          final profile = await widget.apiService.getUserProfile();
+          _currentUserId =
+              (profile['userId'] ?? profile[r'$id'] ?? profile['id'])
+                  ?.toString();
+        } catch (_) {}
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      final savedLaneId = prefs.getString('last_opened_lane_id');
+
+      setState(() {
+        _lanes = [
+          {'id': null, 'name': 'Personal', 'isE2e': _localE2eStatus == 'true'},
+          ...fetched,
+        ];
+
+        final activeId = _activeLane?['id']?.toString() ?? savedLaneId;
+        final matchedIndex = _lanes.indexWhere(
+          (l) => l['id']?.toString() == activeId,
+        );
+        if (matchedIndex != -1) {
+          _activeLane = _lanes[matchedIndex];
+        } else {
+          _activeLane = _lanes.first;
+        }
+      });
+    } catch (e) {
+      debugPrint('Failed to fetch lanes: $e');
+    }
+  }
+
+  Future<void> _createNewLane(String name, bool isE2e) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final laneData = await widget.apiService.createLane(
+        name: name,
+        isE2e: isE2e,
+      );
+      final String laneId = (laneData['id'] ?? laneData[r'$id'] ?? '')
+          .toString();
+
+      if (isE2e) {
+        final random = Random.secure();
+        final keyBytes = List<int>.generate(32, (_) => random.nextInt(256));
+        final String laneKey = base64Encode(keyBytes);
+
+        final myPublicKeyJson = await _storage.read(
+          key: 'memory_lanes_public_key',
+        );
+        if (myPublicKeyJson != null) {
+          final encryptedLaneKey = encryptLaneKeyWithJsonPublicKey(
+            laneKey,
+            myPublicKeyJson,
+          );
+
+          final profile = await widget.apiService.getUserProfile();
+          final String myUserId =
+              (profile['userId'] ?? profile[r'$id'] ?? profile['id'] ?? '')
+                  .toString();
+
+          await widget.apiService.saveLaneKey(
+            laneId,
+            myUserId,
+            encryptedLaneKey,
+          );
+          await _storage.write(
+            key: 'memory_lanes_password_$laneId',
+            value: laneKey,
+          );
+        }
+      }
+
+      await _fetchLanes();
+
+      if (mounted) {
+        final newLane = _lanes.firstWhere(
+          (l) => l['id'] == laneId,
+          orElse: () => _lanes.first,
+        );
+        setState(() {
+          _activeLane = newLane;
+        });
+        Navigator.pop(context); // Dismiss loading spinner
+        _loadMemories();
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Dismiss loading spinner
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to create lane: $e')));
+      }
+    }
+  }
+
+  void _showLaneSwitcherBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20.0),
+                child: Text(
+                  'Select Memory Lane',
+                  style: GoogleFonts.gabarito(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: _lanes.length,
+                  itemBuilder: (context, index) {
+                    final lane = _lanes[index];
+                    final isSelected = _activeLane?['id'] == lane['id'];
+                    final isE2e = lane['isE2e'] == true;
+                    final isPersonal = lane['id'] == null;
+
+                    return Container(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? colorScheme.primaryContainer.withOpacity(0.12)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: isSelected
+                              ? colorScheme.primary.withOpacity(0.3)
+                              : Colors.transparent,
+                        ),
+                      ),
+                      child: ListTile(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        leading: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? colorScheme.primary.withOpacity(0.15)
+                                : colorScheme.onSurface.withOpacity(0.04),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            isPersonal
+                                ? Icons.person_rounded
+                                : Icons.people_rounded,
+                            color: isSelected
+                                ? colorScheme.primary
+                                : colorScheme.onSurfaceVariant,
+                            size: 20,
+                          ),
+                        ),
+                        title: Text(
+                          lane['name'] ?? 'Lane',
+                          style: GoogleFonts.gabarito(
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.w600,
+                            color: isSelected
+                                ? colorScheme.primary
+                                : colorScheme.onSurface,
+                          ),
+                        ),
+                        subtitle: Text(
+                          isPersonal
+                              ? 'Only visible to you'
+                              : ((lane['creatorId']?.toString() ==
+                                        _currentUserId)
+                                    ? (isE2e
+                                          ? 'Owner of E2EE shared space'
+                                          : 'Owner of the shared space')
+                                    : (isE2e
+                                          ? 'Member of E2EE shared space'
+                                          : 'Member of the shared space')),
+                          style: GoogleFonts.gabarito(
+                            fontSize: 11,
+                            color: isSelected
+                                ? colorScheme.primary.withOpacity(0.8)
+                                : colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        trailing: isE2e
+                            ? Icon(
+                                Icons.security_rounded,
+                                size: 16,
+                                color: isSelected
+                                    ? colorScheme.primary
+                                    : colorScheme.outline,
+                              )
+                            : null,
+                        onTap: () async {
+                          Navigator.pop(context);
+                          setState(() {
+                            _activeLane = lane;
+                          });
+                          try {
+                            final prefs = await SharedPreferences.getInstance();
+                            if (lane['id'] != null) {
+                              await prefs.setString(
+                                'last_opened_lane_id',
+                                lane['id'].toString(),
+                              );
+                            } else {
+                              await prefs.remove('last_opened_lane_id');
+                            }
+                          } catch (_) {}
+                          _loadMemories();
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: ListTile(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.add_rounded,
+                      color: colorScheme.primary,
+                      size: 20,
+                    ),
+                  ),
+                  title: Text(
+                    'Create New Memory Lane',
+                    style: GoogleFonts.gabarito(
+                      color: colorScheme.primary,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showCreateLaneDialog();
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showCreateLaneDialog() {
+    final nameController = TextEditingController();
+    bool isE2e = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final colorScheme = Theme.of(context).colorScheme;
+          return AlertDialog(
+            title: Text(
+              'Create Memory Lane',
+              style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  style: TextStyle(color: colorScheme.onSurface),
+                  decoration: const InputDecoration(
+                    labelText: 'Lane Name',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: Text(
+                    'End-to-End Encrypted',
+                    style: GoogleFonts.gabarito(fontSize: 14),
+                  ),
+                  subtitle: Text(
+                    'E2E lanes encrypt your memories before sending them to the cloud.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  value: isE2e,
+                  onChanged: (val) {
+                    setDialogState(() {
+                      isE2e = val;
+                    });
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  if (nameController.text.trim().isEmpty) return;
+                  Navigator.pop(context);
+                  await _createNewLane(nameController.text.trim(), isE2e);
+                },
+                child: const Text('Create'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showLaneSettingsSheet() {
+    final searchController = TextEditingController();
+    bool isSearchingUser = false;
+    Map<String, dynamic>? foundUser;
+    String? searchError;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final colorScheme = Theme.of(context).colorScheme;
+
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              24,
+              24,
+              24,
+              MediaQuery.of(context).viewInsets.bottom + 24,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Lane Settings - ${_activeLane?['name']}',
+                  style: GoogleFonts.gabarito(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _activeLane?['isE2e'] == true
+                      ? 'End-to-End Encrypted Shared Lane'
+                      : 'Shared Lane',
+                  style: GoogleFonts.gabarito(
+                    fontSize: 12,
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Divider(),
+                const SizedBox(height: 16),
+                Builder(
+                  builder: (context) {
+                    final laneId = _activeLane?['id']?.toString();
+                    final laneCreatorId = _activeLane?['creatorId']?.toString();
+                    final isCreator =
+                        laneCreatorId == null ||
+                        _currentUserId == null ||
+                        laneCreatorId == _currentUserId;
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (isCreator) ...[
+                          Text(
+                            'Invite Partner to Lane',
+                            style: GoogleFonts.gabarito(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: searchController,
+                                  style: TextStyle(
+                                    color: colorScheme.onSurface,
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: 'Enter email address',
+                                    errorText: searchError,
+                                    border: const OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              FilledButton(
+                                onPressed: isSearchingUser
+                                    ? null
+                                    : () async {
+                                        final query = searchController.text
+                                            .trim();
+                                        if (query.isEmpty) return;
+                                        setSheetState(() {
+                                          isSearchingUser = true;
+                                          searchError = null;
+                                          foundUser = null;
+                                        });
+                                        try {
+                                          final res = await widget.apiService
+                                              .searchUser(query);
+                                          final foundId =
+                                              (res['userId'] ??
+                                                      res['id'] ??
+                                                      res[r'$id'])
+                                                  ?.toString();
+                                          if (foundId != null &&
+                                              foundId == _currentUserId) {
+                                            setSheetState(() {
+                                              searchError =
+                                                  'You can\'t add yourself';
+                                              isSearchingUser = false;
+                                            });
+                                          } else {
+                                            setSheetState(() {
+                                              foundUser = res;
+                                              isSearchingUser = false;
+                                            });
+                                          }
+                                        } catch (e) {
+                                          String msg = e.toString().replaceAll(
+                                            'Exception: ',
+                                            '',
+                                          );
+                                          if (msg.contains('{') &&
+                                              msg.contains('}')) {
+                                            try {
+                                              final jsonStart = msg.indexOf(
+                                                '{',
+                                              );
+                                              final jsonStr = msg.substring(
+                                                jsonStart,
+                                              );
+                                              final decoded = jsonDecode(
+                                                jsonStr,
+                                              );
+                                              if (decoded is Map &&
+                                                  decoded['error'] != null) {
+                                                msg = decoded['error']
+                                                    .toString();
+                                              }
+                                            } catch (_) {}
+                                          }
+                                          setSheetState(() {
+                                            searchError = msg.isNotEmpty
+                                                ? msg
+                                                : 'User not found';
+                                            isSearchingUser = false;
+                                          });
+                                        }
+                                      },
+                                child: isSearchingUser
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Text('Search'),
+                              ),
+                            ],
+                          ),
+                          if (foundUser != null) ...[
+                            const SizedBox(height: 16),
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: colorScheme.surfaceContainerHigh,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: colorScheme.primary.withOpacity(0.2),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 24,
+                                    backgroundColor:
+                                        colorScheme.primaryContainer,
+                                    foregroundColor:
+                                        colorScheme.onPrimaryContainer,
+                                    child: Text(
+                                      (foundUser!['name']?.toString() ?? 'U')[0]
+                                          .toUpperCase(),
+                                      style: GoogleFonts.gabarito(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          foundUser!['name'] ?? 'User',
+                                          style: GoogleFonts.gabarito(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 15,
+                                            color: colorScheme.onSurface,
+                                          ),
+                                        ),
+                                        if (foundUser!['username'] != null)
+                                          Text(
+                                            '@${foundUser!['username']}',
+                                            style: GoogleFonts.gabarito(
+                                              fontSize: 12,
+                                              color: colorScheme.primary,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  FilledButton.icon(
+                                    onPressed: () async {
+                                      final partnerId =
+                                          (foundUser!['userId'] ??
+                                                  foundUser!['id'] ??
+                                                  foundUser!['_id'] ??
+                                                  foundUser!['user_id'] ??
+                                                  foundUser![r'$id'])
+                                              ?.toString();
+                                      final partnerPublicKeyStr =
+                                          foundUser!['publicKey'];
+                                      final laneId = _activeLane?['id'];
+
+                                      if (laneId == null) return;
+                                      if (partnerId == null ||
+                                          partnerId.isEmpty ||
+                                          partnerId == 'null') {
+                                        setSheetState(() {
+                                          searchError =
+                                              'Could not get user ID for the selected user.';
+                                        });
+                                        return;
+                                      }
+
+                                      try {
+                                        await widget.apiService.inviteToLane(
+                                          laneId,
+                                          partnerId,
+                                        );
+
+                                        if (_activeLane?['isE2e'] == true) {
+                                          if (partnerPublicKeyStr == null ||
+                                              partnerPublicKeyStr
+                                                  .toString()
+                                                  .isEmpty) {
+                                            throw Exception(
+                                              'Partner has not set up their encryption key yet.',
+                                            );
+                                          }
+
+                                          final String?
+                                          myLaneKey = await _storage.read(
+                                            key:
+                                                'memory_lanes_password_$laneId',
+                                          );
+                                          if (myLaneKey != null) {
+                                            final encryptedLaneKey =
+                                                encryptLaneKeyWithJsonPublicKey(
+                                                  myLaneKey,
+                                                  partnerPublicKeyStr,
+                                                );
+                                            await widget.apiService.saveLaneKey(
+                                              laneId,
+                                              partnerId,
+                                              encryptedLaneKey,
+                                            );
+                                          }
+                                        }
+
+                                        if (context.mounted) {
+                                          Navigator.pop(context);
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Successfully added member to lane!',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                        await _fetchLanes();
+                                      } catch (e) {
+                                        String msg = e
+                                            .toString()
+                                            .replaceAll('Exception: ', '')
+                                            .replaceAll(
+                                              'Failed to invite member: ',
+                                              '',
+                                            );
+                                        if (msg.contains('{') &&
+                                            msg.contains('}')) {
+                                          try {
+                                            final jsonStart = msg.indexOf('{');
+                                            final jsonStr = msg.substring(
+                                              jsonStart,
+                                            );
+                                            final decoded = jsonDecode(jsonStr);
+                                            if (decoded is Map &&
+                                                decoded['error'] != null) {
+                                              msg = decoded['error'].toString();
+                                            }
+                                          } catch (_) {}
+                                        }
+                                        setSheetState(() {
+                                          searchError = msg;
+                                        });
+                                      }
+                                    },
+                                    icon: const Icon(
+                                      Icons.person_add_alt_1_rounded,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Add'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
+                          const Divider(),
+                          const SizedBox(height: 16),
+                        ],
+                        Text(
+                          'Members in this Lane',
+                          style: GoogleFonts.gabarito(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (laneId != null)
+                          FutureBuilder<List<dynamic>>(
+                            future: widget.apiService.getLaneMembers(laneId),
+                            builder: (context, snapshot) {
+                              if (snapshot.connectionState ==
+                                  ConnectionState.waiting) {
+                                return const Padding(
+                                  padding: EdgeInsets.all(12.0),
+                                  child: Center(
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                );
+                              }
+                              if (snapshot.hasError ||
+                                  !snapshot.hasData ||
+                                  snapshot.data!.isEmpty) {
+                                return Text(
+                                  'Unable to load members',
+                                  style: TextStyle(
+                                    color: colorScheme.onSurfaceVariant,
+                                    fontSize: 13,
+                                  ),
+                                );
+                              }
+                              final members = snapshot.data!;
+                              return Column(
+                                children: members.map((m) {
+                                  final mUserId =
+                                      (m['userId'] ?? m['id'] ?? m[r'$id'])
+                                          ?.toString();
+                                  final isMemberOwner =
+                                      mUserId != null &&
+                                      mUserId == laneCreatorId;
+                                  return ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: CircleAvatar(
+                                      radius: 16,
+                                      backgroundColor:
+                                          colorScheme.primaryContainer,
+                                      child: Icon(
+                                        Icons.person,
+                                        size: 18,
+                                        color: colorScheme.onPrimaryContainer,
+                                      ),
+                                    ),
+                                    title: Text(
+                                      mUserId == _currentUserId
+                                          ? 'You ($mUserId)'
+                                          : (mUserId ?? 'Member'),
+                                      style: GoogleFonts.gabarito(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    trailing: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: isMemberOwner
+                                            ? colorScheme.primaryContainer
+                                            : colorScheme
+                                                  .surfaceContainerHighest,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        isMemberOwner ? 'Owner' : 'Member',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: isMemberOwner
+                                              ? colorScheme.onPrimaryContainer
+                                              : colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              );
+                            },
+                          ),
+                        const SizedBox(height: 16),
+                        if (!isCreator && laneId != null) ...[
+                          const Divider(),
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: colorScheme.error,
+                                side: BorderSide(color: colorScheme.error),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                              ),
+                              icon: const Icon(Icons.exit_to_app_rounded),
+                              label: Text(
+                                'Leave Memory Lane',
+                                style: GoogleFonts.gabarito(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              onPressed: () async {
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Leave Memory Lane?'),
+                                    content: const Text(
+                                      'You will no longer have access to this shared lane. The lane and its memories will remain for other members.',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(context, false),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      FilledButton(
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor: colorScheme.error,
+                                          foregroundColor: colorScheme.onError,
+                                        ),
+                                        onPressed: () =>
+                                            Navigator.pop(context, true),
+                                        child: const Text('Leave'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirm == true) {
+                                  Navigator.pop(context);
+                                  showDialog(
+                                    context: context,
+                                    barrierDismissible: false,
+                                    builder: (context) => const Center(
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  );
+                                  try {
+                                    await widget.apiService.leaveLane(laneId);
+                                    await _storage.delete(
+                                      key: 'memory_lanes_password_$laneId',
+                                    );
+                                    await _fetchLanes();
+                                    if (mounted) {
+                                      setState(
+                                        () => _activeLane = _lanes.first,
+                                      );
+                                      Navigator.pop(context);
+                                      _loadMemories();
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'You have left the memory lane.',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    if (mounted) {
+                                      Navigator.pop(context);
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Failed to leave lane: $e',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  }
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        if (isCreator)
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: colorScheme.error,
+                                side: BorderSide(color: colorScheme.error),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                              ),
+                              icon: const Icon(Icons.delete_forever_rounded),
+                              label: Text(
+                                'Delete Memory Lane',
+                                style: GoogleFonts.gabarito(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              onPressed: () async {
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Delete Memory Lane?'),
+                                    content: const Text(
+                                      'Are you sure you want to permanently delete this memory lane? This action cannot be undone, and all shared memories in this lane will be lost forever.',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(context, false),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      FilledButton(
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor: colorScheme.error,
+                                          foregroundColor: colorScheme.onError,
+                                        ),
+                                        onPressed: () =>
+                                            Navigator.pop(context, true),
+                                        child: const Text('Delete'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirm == true) {
+                                  Navigator.pop(context);
+                                  showDialog(
+                                    context: context,
+                                    barrierDismissible: false,
+                                    builder: (context) => const Center(
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  );
+                                  try {
+                                    if (laneId != null) {
+                                      await widget.apiService.deleteLane(
+                                        laneId,
+                                      );
+                                      await _storage.delete(
+                                        key: 'memory_lanes_password_$laneId',
+                                      );
+                                    }
+                                    await _fetchLanes();
+                                    if (mounted) {
+                                      setState(
+                                        () => _activeLane = _lanes.first,
+                                      );
+                                      Navigator.pop(context);
+                                      _loadMemories();
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Memory lane deleted successfully.',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    if (mounted) {
+                                      Navigator.pop(context);
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Failed to delete lane: $e',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  }
+                                }
+                              },
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 24),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _checkInitialState() async {
+    await _setupRsaKeyPair();
+    await _fetchLanes();
+
     final pin = await _storage.read(key: 'memory_lanes_pin');
     if (pin != null) {
       if (mounted) {
@@ -314,7 +1375,9 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
       _currentOffset = 0;
     });
     try {
+      final laneId = _activeLane?['id']?.toString();
       final response = await widget.apiService.getMemories(
+        laneId: laneId,
         length: _pageSize,
         offset: _currentOffset,
       );
@@ -323,6 +1386,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
 
       final drafts = await DraftManager.getDrafts();
       final draftMemories = drafts
+          .where((d) => laneId == null)
           .map(
             (d) => {
               'id': d.id,
@@ -340,8 +1404,12 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
           )
           .toList();
 
-      if (_localE2eStatus == 'true' &&
-          _unlockPasswordController.text.isNotEmpty) {
+      final activeLaneE2e = _activeLane?['isE2e'] == true;
+      final activeKeyString = activeLaneE2e
+          ? await _getActiveLaneKey(laneId)
+          : null;
+
+      if (activeLaneE2e && activeKeyString != null) {
         bool badPassword = false;
 
         String decryptField(String text) {
@@ -355,16 +1423,18 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
 
                 // 1. Try PBKDF2 decryption
                 try {
-                  final key = derivePBKDF2Key(_unlockPasswordController.text);
+                  final key = derivePBKDF2Key(activeKeyString);
                   final encrypter = encrypt.Encrypter(encrypt.AES(key));
                   final decrypted = encrypter.decrypt64(ciphertext, iv: iv);
-                  if (decrypted.startsWith('{"') || decrypted.startsWith('[') || !decrypted.contains('\x00')) {
+                  if (decrypted.startsWith('{"') ||
+                      decrypted.startsWith('[') ||
+                      !decrypted.contains('\x00')) {
                     return decrypted;
                   }
                 } catch (_) {}
 
                 // 2. Fallback to legacy decryption
-                final key = getLegacyKey(_unlockPasswordController.text);
+                final key = getLegacyKey(activeKeyString);
                 final encrypter = encrypt.Encrypter(encrypt.AES(key));
                 return encrypter.decrypt64(ciphertext, iv: iv);
               }
@@ -397,11 +1467,10 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
         }
 
         if (badPassword) {
-          await _storage.delete(key: 'memory_lanes_password');
+          await _storage.delete(key: 'memory_lanes_password_$laneId');
           if (mounted) {
             setState(() {
               _isUnlocked = false;
-              _unlockPasswordController.clear();
             });
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Incorrect encryption password!')),
@@ -438,7 +1507,9 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     final nextOffset = _currentOffset + _pageSize;
 
     try {
+      final laneId = _activeLane?['id']?.toString();
       final response = await widget.apiService.getMemories(
+        laneId: laneId,
         length: _pageSize,
         offset: nextOffset,
       );
@@ -449,8 +1520,12 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
         if (newMemories.isEmpty) {
           setState(() => _hasMore = false);
         } else {
-          if (_localE2eStatus == 'true' &&
-              _unlockPasswordController.text.isNotEmpty) {
+          final activeLaneE2e = _activeLane?['isE2e'] == true;
+          final activeKeyString = activeLaneE2e
+              ? await _getActiveLaneKey(laneId)
+              : null;
+
+          if (activeLaneE2e && activeKeyString != null) {
             bool badPassword = false;
 
             String decryptField(String text) {
@@ -464,16 +1539,18 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
 
                     // 1. Try PBKDF2 decryption
                     try {
-                      final key = derivePBKDF2Key(_unlockPasswordController.text);
+                      final key = derivePBKDF2Key(activeKeyString);
                       final encrypter = encrypt.Encrypter(encrypt.AES(key));
                       final decrypted = encrypter.decrypt64(ciphertext, iv: iv);
-                      if (decrypted.startsWith('{"') || decrypted.startsWith('[') || !decrypted.contains('\x00')) {
+                      if (decrypted.startsWith('{"') ||
+                          decrypted.startsWith('[') ||
+                          !decrypted.contains('\x00')) {
                         return decrypted;
                       }
                     } catch (_) {}
 
                     // 2. Fallback to legacy decryption
-                    final key = getLegacyKey(_unlockPasswordController.text);
+                    final key = getLegacyKey(activeKeyString);
                     final encrypter = encrypt.Encrypter(encrypt.AES(key));
                     return encrypter.decrypt64(ciphertext, iv: iv);
                   }
@@ -506,10 +1583,9 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
             }
 
             if (badPassword) {
-              await _storage.delete(key: 'memory_lanes_password');
+              await _storage.delete(key: 'memory_lanes_password_$laneId');
               setState(() {
                 _isUnlocked = false;
-                _unlockPasswordController.clear();
               });
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Incorrect encryption password!')),
@@ -750,7 +1826,8 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                   showDialog(
                     context: context,
                     barrierDismissible: false,
-                    builder: (context) => const Center(child: CircularProgressIndicator()),
+                    builder: (context) =>
+                        const Center(child: CircularProgressIndicator()),
                   );
                   await prewarmPBKDF2Key(_unlockPasswordController.text);
                   if (context.mounted) {
@@ -811,7 +1888,22 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                   });
                 },
               )
-            : const Text('Memory Lanes'),
+            : GestureDetector(
+                onTap: _showLaneSwitcherBottomSheet,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _activeLane?['name'] ?? 'Memory Lanes',
+                      style: GoogleFonts.gabarito(
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    const Icon(Icons.arrow_drop_down_rounded),
+                  ],
+                ),
+              ),
         centerTitle: !_isSearching,
         leading: _isSearching
             ? IconButton(
@@ -829,63 +1921,106 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
               )
             : null,
         actions: [
-          if (!_isSearching)
+          if (!_isSearching) ...[
             IconButton(
               icon: Icon(Icons.search_rounded, color: colorScheme.onSurface),
               tooltip: 'Search',
               onPressed: () => setState(() => _isSearching = true),
             ),
-          if (!_isSearching && _localE2eStatus == 'true' && _isUnlocked)
-            IconButton(
-              icon: Icon(Icons.key_rounded, color: colorScheme.onSurface),
-              tooltip: 'View Encryption Password',
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Your Encryption Password'),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert_rounded, color: colorScheme.onSurface),
+              onSelected: (value) async {
+                switch (value) {
+                  case 'settings':
+                    _showLaneSettingsSheet();
+                    break;
+                  case 'key':
+                    final activeKey = await _getActiveLaneKey(
+                      _activeLane?['id']?.toString(),
+                    );
+                    if (activeKey == null) return;
+                    if (context.mounted) {
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Lane Encryption Password'),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Save this key securely! If your partner logs in, they will need this key if they do not have a private key backup.',
+                                style: TextStyle(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              SelectableText(
+                                activeKey,
+                                style: TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
+                            ],
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('Close'),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    break;
+                  case 'pin':
+                    _showPinSetupDialog();
+                    break;
+                }
+              },
+              itemBuilder: (context) => [
+                if (_activeLane?['id'] != null)
+                  const PopupMenuItem(
+                    value: 'settings',
+                    child: Row(
                       children: [
-                        Text(
-                          'Save this key securely! If you log into a new device and forget it, your memories will be lost forever!',
-                          style: TextStyle(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        SelectableText(
-                          _unlockPasswordController.text,
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                        ),
+                        Icon(Icons.people_outline_rounded, size: 20),
+                        SizedBox(width: 12),
+                        Text('Lane Settings / Invite'),
                       ],
                     ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Close'),
+                  ),
+                if (_activeLane?['isE2e'] == true)
+                  const PopupMenuItem(
+                    value: 'key',
+                    child: Row(
+                      children: [
+                        Icon(Icons.key_rounded, size: 20),
+                        SizedBox(width: 12),
+                        Text('Encryption Password'),
+                      ],
+                    ),
+                  ),
+                PopupMenuItem(
+                  value: 'pin',
+                  child: Row(
+                    children: [
+                      Icon(
+                        _pin != null ? Icons.lock : Icons.lock_open,
+                        size: 20,
                       ),
+                      const SizedBox(width: 12),
+                      Text(_pin != null ? 'Disable PIN' : 'Setup PIN'),
                     ],
                   ),
-                );
-              },
+                ),
+              ],
             ),
-          if (!_isSearching)
-            IconButton(
-              icon: Icon(
-                _pin != null ? Icons.lock : Icons.lock_open,
-                color: colorScheme.onSurface,
-              ),
-              tooltip: 'Lock Settings',
-              onPressed: _showPinSetupDialog,
-            ),
+          ],
           const SizedBox(width: 8),
         ],
       ),
@@ -894,26 +2029,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
           : _isSearching
           ? _buildSearchResults(context, colorScheme)
           : _memories.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.auto_stories_outlined,
-                    size: 64,
-                    color: colorScheme.outline,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No memories yet',
-                    style: GoogleFonts.gabarito(
-                      fontSize: 18,
-                      color: colorScheme.outline,
-                    ),
-                  ),
-                ],
-              ),
-            )
+          ? _buildEmptyState(context, colorScheme)
           : _isCalendarView
           ? _buildCalendarView(context, colorScheme)
           : _buildListView(context, colorScheme),
@@ -923,7 +2039,8 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
             MaterialPageRoute(
               builder: (_) => CreateMemoryPage(
                 apiService: widget.apiService,
-                e2eEnabled: _localE2eStatus == 'true',
+                e2eEnabled: _activeLane?['isE2e'] == true,
+                laneId: _activeLane?['id']?.toString(),
               ),
             ),
           );
@@ -932,6 +2049,187 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
           }
         },
         child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context, ColorScheme colorScheme) {
+    final isShared = _activeLane?['id'] != null;
+    final isE2e = _activeLane?['isE2e'] == true;
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
+        child: Container(
+          width: double.infinity,
+          constraints: const BoxConstraints(maxWidth: 400),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(
+              color: colorScheme.outlineVariant.withOpacity(0.4),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.03),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(28.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      colorScheme.primaryContainer,
+                      colorScheme.secondaryContainer,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: colorScheme.primary.withOpacity(0.15),
+                      blurRadius: 15,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  isShared
+                      ? Icons.people_alt_rounded
+                      : Icons.auto_stories_rounded,
+                  size: 36,
+                  color: colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                isShared
+                    ? (_activeLane?['name'] ?? 'Shared Memory Lane')
+                    : 'Personal',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.gabarito(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                isShared
+                    ? 'A secure, private space to document your journeys, save milestones, and build a shared history together in real-time.'
+                    : 'Your private sanctuary to record thoughts, reflections, and milestones. Safe, secure, and always accessible.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.gabarito(
+                  fontSize: 14,
+                  height: 1.4,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              if (isE2e) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.security_rounded,
+                        size: 14,
+                        color: colorScheme.primary,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'End-to-End Encrypted',
+                        style: GoogleFonts.gabarito(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 50),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                onPressed: () async {
+                  final result = await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => CreateMemoryPage(
+                        apiService: widget.apiService,
+                        e2eEnabled: _activeLane?['isE2e'] == true,
+                        laneId: _activeLane?['id']?.toString(),
+                      ),
+                    ),
+                  );
+                  if (result == true) {
+                    _loadMemories();
+                  }
+                },
+                icon: const Icon(Icons.add_rounded),
+                label: Text(
+                  'Write First Memory',
+                  style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (isShared)
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 50),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  onPressed: _showLaneSettingsSheet,
+                  icon: const Icon(Icons.person_add_rounded),
+                  label: Text(
+                    'Invite Partner / Add Friend',
+                    style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
+                  ),
+                )
+              else
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 50),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  onPressed: _showLaneSwitcherBottomSheet,
+                  icon: const Icon(Icons.people_rounded),
+                  label: Text(
+                    'Explore Shared Lanes',
+                    style: GoogleFonts.gabarito(fontWeight: FontWeight.bold),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1484,8 +2782,9 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                     MaterialPageRoute(
                       builder: (context) => CreateMemoryPage(
                         apiService: widget.apiService,
-                        e2eEnabled: _localE2eStatus == 'true',
+                        e2eEnabled: _activeLane?['isE2e'] == true,
                         draft: memory['draftObject'],
+                        laneId: _activeLane?['id']?.toString(),
                       ),
                     ),
                   );
@@ -1848,58 +3147,155 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   }
 
   Widget _buildWelcomeStep(ColorScheme colorScheme) {
-    return Column(
-      key: const ValueKey(1),
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 400),
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        key: const ValueKey(1),
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            height: 200,
+            width: 200,
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            padding: const EdgeInsets.all(24),
+            child: _showIntroAnimation
+                ? Lottie.asset(
+                    'assets/anim/memorylanes.json',
+                    controller: _introController,
+                    onLoaded: _onIntroLoaded,
+                    fit: BoxFit.contain,
+                  )
+                : Lottie.asset('assets/anim/notepad.json', fit: BoxFit.contain),
+          ),
+          const SizedBox(height: 36),
+          Text(
+            'Memory Lanes',
+            style: GoogleFonts.gabarito(
+              fontSize: 34,
+              fontWeight: FontWeight.w800,
+              color: colorScheme.onSurface,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Capture the beautiful milestones and lessons of your life. Keep them in your private journal, or create Shared Lanes with partners and close friends to walk down memory lane together!',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.gabarito(
+              fontSize: 15,
+              height: 1.5,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 32),
+          // Features preview
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: colorScheme.outlineVariant.withOpacity(0.3),
+              ),
+            ),
+            child: Column(
+              children: [
+                _buildIntroFeatureRow(
+                  colorScheme,
+                  Icons.person_outline_rounded,
+                  'Personal Journal',
+                  'A private space to record daily reflections and personal milestones.',
+                ),
+                const SizedBox(height: 12),
+                _buildIntroFeatureRow(
+                  colorScheme,
+                  Icons.people_outline_rounded,
+                  'Shared Lanes',
+                  'Collaborative memory spaces to build timelines with friends and partners.',
+                ),
+                const SizedBox(height: 12),
+                _buildIntroFeatureRow(
+                  colorScheme,
+                  Icons.security_rounded,
+                  'End-to-End Encryption',
+                  'Optional E2E encryption keeps your memories entirely private.',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 36),
+          FilledButton(
+            onPressed: () => setState(() => _currentStep = 2),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(double.infinity, 54),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'Next',
+                  style: GoogleFonts.gabarito(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.arrow_forward_rounded),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIntroFeatureRow(
+    ColorScheme colorScheme,
+    IconData icon,
+    String title,
+    String desc,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          constraints: BoxConstraints(
-            maxWidth: _showIntroAnimation ? 300 : 200,
-            maxHeight: _showIntroAnimation ? 300 : 200,
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: colorScheme.primary.withOpacity(0.08),
+            shape: BoxShape.circle,
           ),
-          child: _showIntroAnimation
-              ? Lottie.asset(
-                  'assets/anim/memorylanes.json',
-                  controller: _introController,
-                  onLoaded: _onIntroLoaded,
-                  fit: BoxFit.contain,
-                )
-              : Lottie.asset('assets/anim/notepad.json', fit: BoxFit.contain),
+          child: Icon(icon, size: 20, color: colorScheme.primary),
         ),
-        const SizedBox(height: 32),
-        Text(
-          'Memory Lanes',
-          style: GoogleFonts.gabarito(
-            fontSize: 32,
-            fontWeight: FontWeight.bold,
-            color: colorScheme.onSurface,
-          ),
-        ),
-        const SizedBox(height: 24),
-        Text(
-          'Write down the best - and the worst of your life in your memory lanes so you can occasionally take a trip down the road!',
-          textAlign: TextAlign.center,
-          style: GoogleFonts.gabarito(
-            fontSize: 18,
-            height: 1.5,
-            color: colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 48),
-        FilledButton(
-          onPressed: () => setState(() => _currentStep = 2),
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-          ),
-          child: Text(
-            'Next',
-            style: GoogleFonts.gabarito(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: GoogleFonts.gabarito(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                desc,
+                style: GoogleFonts.gabarito(
+                  fontSize: 12,
+                  color: colorScheme.onSurfaceVariant,
+                  height: 1.3,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -1907,249 +3303,134 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   }
 
   Widget _buildSecurityStep(ColorScheme colorScheme) {
-    return Column(
-      key: const ValueKey(2),
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Container(
-          constraints: const BoxConstraints(maxWidth: 200, maxHeight: 200),
-          child: Lottie.asset(
-            'assets/anim/safe.json',
-            repeat: false,
-            fit: BoxFit.contain,
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 400),
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        key: const ValueKey(2),
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            height: 160,
+            width: 160,
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            padding: const EdgeInsets.all(20),
+            child: Lottie.asset(
+              'assets/anim/safe.json',
+              repeat: false,
+              fit: BoxFit.contain,
+            ),
           ),
-        ),
-        const SizedBox(height: 24),
-        Text(
-          'Secure your memories',
-          style: GoogleFonts.gabarito(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: colorScheme.onSurface,
+          const SizedBox(height: 24),
+          Text(
+            'Secure your memories',
+            style: GoogleFonts.gabarito(
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              color: colorScheme.onSurface,
+              letterSpacing: -0.5,
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: Column(
-            children: [
-              _buildWarningItem(
-                context,
-                'Your memories are encrypted on AurAchieve\'s servers.',
-                icon: Icons.lock_outline,
-              ),
-              _buildWarningItem(
-                context,
-                'Read more in the Privacy Policy.',
-                icon: Icons.privacy_tip_outlined,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        Card(
-          elevation: 0,
-          color: colorScheme.surfaceContainer,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-            side: BorderSide(color: colorScheme.outlineVariant),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                IgnorePointer(
-                  child: CheckboxListTile(
-                    value: true,
-                    onChanged: (_) {},
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(
-                      'Encryption',
-                      style: GoogleFonts.gabarito(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    subtitle: Text(
-                      'Always active',
-                      style: GoogleFonts.gabarito(color: colorScheme.primary),
-                    ),
-                    secondary: Icon(Icons.security, color: colorScheme.primary),
-                  ),
+                _buildWarningItem(
+                  context,
+                  'Your memories are encrypted on AurAchieve\'s servers.',
+                  icon: Icons.lock_outline,
                 ),
-                const Divider(),
-                Theme(
-                  data: Theme.of(
-                    context,
-                  ).copyWith(dividerColor: Colors.transparent),
-                  child: ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    title: Text(
-                      'Advanced Security',
-                      style: GoogleFonts.gabarito(
-                        fontWeight: FontWeight.w600,
-                        color: colorScheme.onSurface,
+                _buildWarningItem(
+                  context,
+                  'Read more in the Privacy Policy.',
+                  icon: Icons.privacy_tip_outlined,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          Card(
+            elevation: 0,
+            color: colorScheme.surfaceContainerLow,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(
+                color: colorScheme.outlineVariant.withOpacity(0.4),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  IgnorePointer(
+                    child: CheckboxListTile(
+                      value: true,
+                      onChanged: (_) {},
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        'Standard Encryption',
+                        style: GoogleFonts.gabarito(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Always active on our cloud',
+                        style: GoogleFonts.gabarito(
+                          color: colorScheme.primary,
+                          fontSize: 12,
+                        ),
+                      ),
+                      secondary: Icon(
+                        Icons.security,
+                        color: colorScheme.primary,
                       ),
                     ),
-                    leading: Icon(
-                      Icons.admin_panel_settings_outlined,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    children: [
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(
-                          'End-to-End Encryption',
-                          style: GoogleFonts.gabarito(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
+                  ),
+                  const Divider(),
+                  Theme(
+                    data: Theme.of(
+                      context,
+                    ).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      tilePadding: EdgeInsets.zero,
+                      title: Text(
+                        'Advanced Security',
+                        style: GoogleFonts.gabarito(
+                          fontWeight: FontWeight.w600,
+                          color: colorScheme.onSurface,
                         ),
-                        subtitle: Text(
-                          'Maximum privacy with your own password',
-                          style: GoogleFonts.gabarito(
-                            color: colorScheme.onSurfaceVariant,
-                            fontSize: 12,
-                          ),
-                        ),
-                        value: _e2eEnabled,
-                        onChanged: (val) async {
-                          setState(() => _e2eEnabled = val);
-                          if (val && _passwordController.text.isEmpty) {
-                            try {
-                              final wordListStr = await DefaultAssetBundle.of(
-                                context,
-                              ).loadString('assets/eff_large_wordlist.txt');
-                              final lines = wordListStr.split('\n');
-                              final words = <String>[];
-                              for (var line in lines) {
-                                final parts = line.split('\t');
-                                if (parts.length >= 2) {
-                                  words.add(parts[1].trim());
-                                }
-                              }
-                              if (words.isNotEmpty) {
-                                final random = Random.secure();
-                                final wordCount = 7 + random.nextInt(3);
-                                final selectedWords = <String>[];
-                                for (var i = 0; i < wordCount; i++) {
-                                  selectedWords.add(
-                                    words[random.nextInt(words.length)],
-                                  );
-                                }
-                                final key = selectedWords.join('-');
-                                _passwordController.text = key;
-                                setState(() {
-                                  _obscurePassword = false;
-                                });
-                              }
-                            } catch (e) {}
-                          }
-                        },
                       ),
-                      if (_e2eEnabled) ...[
-                        const SizedBox(height: 16),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: colorScheme.outlineVariant.withValues(
-                                alpha: 0.5,
-                              ),
+                      leading: Icon(
+                        Icons.admin_panel_settings_outlined,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      children: [
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            'End-to-End Encryption',
+                            style: GoogleFonts.gabarito(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    'Recovery Passphrase',
-                                    style: GoogleFonts.gabarito(
-                                      fontWeight: FontWeight.bold,
-                                      color: colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: Icon(
-                                          _obscurePassword
-                                              ? Icons.visibility_outlined
-                                              : Icons.visibility_off_outlined,
-                                          size: 20,
-                                        ),
-                                        visualDensity: VisualDensity.compact,
-                                        onPressed: () {
-                                          setState(
-                                            () => _obscurePassword =
-                                                !_obscurePassword,
-                                          );
-                                        },
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.copy_rounded,
-                                          size: 20,
-                                        ),
-                                        visualDensity: VisualDensity.compact,
-                                        onPressed: () {
-                                          Clipboard.setData(
-                                            ClipboardData(
-                                              text: _passwordController.text,
-                                            ),
-                                          );
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Passphrase copied!',
-                                              ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              if (_obscurePassword)
-                                Text(
-                                  '••••••••••••••••••••••••••••••••',
-                                  style: TextStyle(
-                                    fontSize: 24,
-                                    letterSpacing: 4,
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                )
-                              else
-                                SelectableText(
-                                  _passwordController.text,
-                                  style: TextStyle(
-                                    fontFamily: 'monospace',
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 18,
-                                    height: 1.5,
-                                    color: colorScheme.onSurface,
-                                  ),
-                                ),
-                            ],
+                          subtitle: Text(
+                            'Maximum privacy with your own password',
+                            style: GoogleFonts.gabarito(
+                              color: colorScheme.onSurfaceVariant,
+                              fontSize: 12,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton.icon(
-                            onPressed: () async {
+                          value: _e2eEnabled,
+                          onChanged: (val) async {
+                            setState(() => _e2eEnabled = val);
+                            if (val && _passwordController.text.isEmpty) {
                               try {
                                 final wordListStr = await DefaultAssetBundle.of(
                                   context,
@@ -2162,7 +3443,6 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                                     words.add(parts[1].trim());
                                   }
                                 }
-
                                 if (words.isNotEmpty) {
                                   final random = Random.secure();
                                   final wordCount = 7 + random.nextInt(3);
@@ -2172,182 +3452,347 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                                       words[random.nextInt(words.length)],
                                     );
                                   }
-
                                   final key = selectedWords.join('-');
                                   _passwordController.text = key;
+                                  setState(() {
+                                    _obscurePassword = false;
+                                  });
                                 }
-                              } catch (e) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Failed to generate: $e'),
+                              } catch (e) {}
+                            }
+                          },
+                        ),
+                        if (_e2eEnabled) ...[
+                          const SizedBox(height: 16),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: colorScheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: colorScheme.outlineVariant.withOpacity(
+                                  0.5,
+                                ),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Recovery Passphrase',
+                                      style: GoogleFonts.gabarito(
+                                        fontWeight: FontWeight.bold,
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
                                     ),
-                                  );
-                                }
-                              }
-
-                              setState(() {
-                                _obscurePassword = false;
-                              });
-                            },
-                            icon: const Icon(Icons.refresh_rounded),
-                            label: const Text('Generate Another One'),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: Icon(
+                                            _obscurePassword
+                                                ? Icons.visibility_outlined
+                                                : Icons.visibility_off_outlined,
+                                            size: 20,
+                                          ),
+                                          visualDensity: VisualDensity.compact,
+                                          onPressed: () {
+                                            setState(
+                                              () => _obscurePassword =
+                                                  !_obscurePassword,
+                                            );
+                                          },
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.copy_rounded,
+                                            size: 20,
+                                          ),
+                                          visualDensity: VisualDensity.compact,
+                                          onPressed: () {
+                                            Clipboard.setData(
+                                              ClipboardData(
+                                                text: _passwordController.text,
+                                              ),
+                                            );
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'Passphrase copied!',
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                if (_obscurePassword)
+                                  Text(
+                                    '••••••••••••••••••••••••••••••••',
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      letterSpacing: 4,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                  )
+                                else
+                                  SelectableText(
+                                    _passwordController.text,
+                                    style: TextStyle(
+                                      fontFamily: 'monospace',
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 18,
+                                      height: 1.5,
+                                      color: colorScheme.onSurface,
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        _buildWarningItem(
-                          context,
-                          'If you lose this password, your memories are gone forever and no one, not even AurAchieve, can recover your data.',
-                          isError: true,
-                        ),
-                        _buildWarningItem(
-                          context,
-                          'Memories will be encrypted on your device before being saved to our servers. Media upload size limits may be smaller.',
-                        ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton.icon(
+                              onPressed: () async {
+                                try {
+                                  final wordListStr =
+                                      await DefaultAssetBundle.of(
+                                        context,
+                                      ).loadString(
+                                        'assets/eff_large_wordlist.txt',
+                                      );
+                                  final lines = wordListStr.split('\n');
+                                  final words = <String>[];
+                                  for (var line in lines) {
+                                    final parts = line.split('\t');
+                                    if (parts.length >= 2) {
+                                      words.add(parts[1].trim());
+                                    }
+                                  }
+
+                                  if (words.isNotEmpty) {
+                                    final random = Random.secure();
+                                    final wordCount = 7 + random.nextInt(3);
+                                    final selectedWords = <String>[];
+                                    for (var i = 0; i < wordCount; i++) {
+                                      selectedWords.add(
+                                        words[random.nextInt(words.length)],
+                                      );
+                                    }
+
+                                    final key = selectedWords.join('-');
+                                    _passwordController.text = key;
+                                  }
+                                } catch (e) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Failed to generate: $e'),
+                                      ),
+                                    );
+                                  }
+                                }
+
+                                setState(() {
+                                  _obscurePassword = false;
+                                });
+                              },
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('Generate Another One'),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _buildWarningItem(
+                            context,
+                            'If you lose this password, your memories are gone forever and no one can recover your data.',
+                            isError: true,
+                          ),
+                          _buildWarningItem(
+                            context,
+                            'Memories will be encrypted on your device before being saved to our servers.',
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
-        const SizedBox(height: 32),
-        FilledButton(
-          onPressed: _isSettingUp
-              ? null
-              : () async {
-                  if (_e2eEnabled) {
-                    if (_passwordController.text.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Please set a password.')),
-                      );
-                      return;
-                    }
-                    if (_passwordController.text.length < 12) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Encryption key must be at least 12 characters.',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-
-                    bool confirmed = false;
-                    await showDialog(
-                      context: context,
-                      barrierDismissible: false,
-                      builder: (ctx) {
-                        int countdown = 5;
-                        Timer? t;
-                        return StatefulBuilder(
-                          builder: (context, setStateDialog) {
-                            t ??= Timer.periodic(const Duration(seconds: 1), (
-                              timer,
-                            ) {
-                              if (countdown > 0) {
-                                setStateDialog(() => countdown--);
-                              } else {
-                                timer.cancel();
-                              }
-                            });
-                            return AlertDialog(
-                              title: Text(
-                                'Save Your Passphrase',
-                                style: GoogleFonts.gabarito(
-                                  fontWeight: FontWeight.bold,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurface,
+          const SizedBox(height: 32),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => setState(() => _currentStep = 1),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 54),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: const Text('Back'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _isSettingUp
+                      ? null
+                      : () async {
+                          if (_e2eEnabled) {
+                            if (_passwordController.text.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Please set a password.'),
                                 ),
-                              ),
-                              content: Text(
-                                'If you lose this passphrase, your memories are gone forever. We cannot recover your data. Have you written it down or saved it securely?',
-                                style: TextStyle(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () {
-                                    t?.cancel();
-                                    Navigator.of(context).pop();
-                                  },
-                                  child: const Text('Cancel'),
-                                ),
-                                FilledButton(
-                                  onPressed: countdown > 0
-                                      ? null
-                                      : () {
-                                          t?.cancel();
-                                          Navigator.of(context).pop(true);
-                                        },
-                                  child: Text(
-                                    countdown > 0
-                                        ? 'Wait ${countdown}s'
-                                        : 'I Have Saved It',
+                              );
+                              return;
+                            }
+                            if (_passwordController.text.length < 12) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Encryption key must be at least 12 characters.',
                                   ),
                                 ),
-                              ],
+                              );
+                              return;
+                            }
+
+                            bool confirmed = false;
+                            await showDialog(
+                              context: context,
+                              barrierDismissible: false,
+                              builder: (ctx) {
+                                int countdown = 5;
+                                Timer? t;
+                                return StatefulBuilder(
+                                  builder: (context, setStateDialog) {
+                                    t ??= Timer.periodic(
+                                      const Duration(seconds: 1),
+                                      (timer) {
+                                        if (countdown > 0) {
+                                          setStateDialog(() => countdown--);
+                                        } else {
+                                          timer.cancel();
+                                        }
+                                      },
+                                    );
+                                    return AlertDialog(
+                                      title: Text(
+                                        'Save Your Passphrase',
+                                        style: GoogleFonts.gabarito(
+                                          fontWeight: FontWeight.bold,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurface,
+                                        ),
+                                      ),
+                                      content: Text(
+                                        'If you lose this passphrase, your memories are gone forever. We cannot recover your data. Have you written it down or saved it securely?',
+                                        style: TextStyle(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () {
+                                            t?.cancel();
+                                            Navigator.of(context).pop();
+                                          },
+                                          child: const Text('Cancel'),
+                                        ),
+                                        FilledButton(
+                                          onPressed: countdown > 0
+                                              ? null
+                                              : () {
+                                                  t?.cancel();
+                                                  Navigator.of(
+                                                    context,
+                                                  ).pop(true);
+                                                },
+                                          child: Text(
+                                            countdown > 0
+                                                ? 'Wait ${countdown}s'
+                                                : 'I Have Saved It',
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                );
+                              },
+                            ).then((value) => confirmed = value == true);
+
+                            if (!confirmed) return;
+                          }
+
+                          setState(() => _isSettingUp = true);
+                          try {
+                            await widget.apiService.setupMemoryLanes(
+                              e2e: _e2eEnabled,
                             );
-                          },
-                        );
-                      },
-                    ).then((value) => confirmed = value == true);
 
-                    if (!confirmed) return;
-                  }
+                            if (_e2eEnabled) {
+                              await prewarmPBKDF2Key(_passwordController.text);
+                              await _storage.write(
+                                key: 'memory_lanes_password',
+                                value: _passwordController.text,
+                              );
+                              _unlockPasswordController.text =
+                                  _passwordController.text;
+                            }
 
-                  setState(() => _isSettingUp = true);
-                  try {
-                    await widget.apiService.setupMemoryLanes(e2e: _e2eEnabled);
-
-                    if (_e2eEnabled) {
-                      await prewarmPBKDF2Key(_passwordController.text);
-                      await _storage.write(
-                        key: 'memory_lanes_password',
-                        value: _passwordController.text,
-                      );
-                      _unlockPasswordController.text = _passwordController.text;
-                    }
-
-                    setState(() {
-                      _localE2eStatus = _e2eEnabled ? 'true' : 'false';
-                    });
-                    _unlock();
-                  } catch (e) {
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text('Setup failed: $e')));
-                  } finally {
-                    if (mounted) setState(() => _isSettingUp = false);
-                  }
-                },
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-          ),
-          child: _isSettingUp
-              ? const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Text(
-                  'Get Started',
-                  style: GoogleFonts.gabarito(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
+                            setState(() {
+                              _localE2eStatus = _e2eEnabled ? 'true' : 'false';
+                            });
+                            _unlock();
+                          } catch (e) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Setup failed: $e')),
+                            );
+                          } finally {
+                            if (mounted) setState(() => _isSettingUp = false);
+                          }
+                        },
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 54),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
+                  child: _isSettingUp
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(
+                          'Get Started',
+                          style: GoogleFonts.gabarito(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
-        ),
-      ],
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 

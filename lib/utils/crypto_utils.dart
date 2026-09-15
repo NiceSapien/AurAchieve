@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:math';
+import 'dart:typed_data';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:pointycastle/export.dart';
 import 'package:flutter/foundation.dart';
@@ -43,3 +45,80 @@ Future<void> prewarmPBKDF2Key(String password) async {
 encrypt.Key getLegacyKey(String password) {
   return encrypt.Key.fromUtf8(password.padRight(32).substring(0, 32));
 }
+
+SecureRandom _getSecureRandom() {
+  final secureRandom = FortunaRandom();
+  final random = Random.secure();
+  final seeds = List<int>.generate(32, (_) => random.nextInt(256));
+  secureRandom.seed(KeyParameter(Uint8List.fromList(seeds)));
+  return secureRandom;
+}
+
+AsymmetricKeyPair<RSAPublicKey, RSAPrivateKey> generateRSAKeyPair() {
+  final keyGen = RSAKeyGenerator();
+  keyGen.init(ParametersWithRandom(
+    RSAKeyGeneratorParameters(BigInt.parse('65537'), 2048, 64),
+    _getSecureRandom(),
+  ));
+  final pair = keyGen.generateKeyPair();
+  return AsymmetricKeyPair<RSAPublicKey, RSAPrivateKey>(
+    pair.publicKey as RSAPublicKey,
+    pair.privateKey as RSAPrivateKey,
+  );
+}
+
+String encodePublicKey(RSAPublicKey key) {
+  return jsonEncode({
+    'modulus': key.modulus.toString(),
+    'exponent': key.publicExponent.toString(),
+  });
+}
+
+RSAPublicKey decodePublicKey(String jsonStr) {
+  final data = jsonDecode(jsonStr);
+  return RSAPublicKey(
+    BigInt.parse(data['modulus']),
+    BigInt.parse(data['exponent']),
+  );
+}
+
+String encodePrivateKey(RSAPrivateKey key) {
+  return jsonEncode({
+    'modulus': key.modulus.toString(),
+    'privateExponent': key.privateExponent.toString(),
+    'p': key.p?.toString(),
+    'q': key.q?.toString(),
+  });
+}
+
+RSAPrivateKey decodePrivateKey(String jsonStr) {
+  final data = jsonDecode(jsonStr);
+  return RSAPrivateKey(
+    BigInt.parse(data['modulus']),
+    BigInt.parse(data['privateExponent']),
+    data['p'] != null ? BigInt.parse(data['p']) : null,
+    data['q'] != null ? BigInt.parse(data['q']) : null,
+  );
+}
+
+String encryptLaneKey(String laneKey, RSAPublicKey publicKey) {
+  final encrypter = encrypt.Encrypter(encrypt.RSA(publicKey: publicKey));
+  return encrypter.encrypt(laneKey).base64;
+}
+
+String decryptLaneKey(String encryptedBase64, RSAPrivateKey privateKey) {
+  final encrypter = encrypt.Encrypter(encrypt.RSA(privateKey: privateKey));
+  return encrypter.decrypt(encrypt.Encrypted.fromBase64(encryptedBase64));
+}
+
+String encryptLaneKeyWithJsonPublicKey(String laneKey, String publicKeyJson) {
+  final publicKey = decodePublicKey(publicKeyJson);
+  return encryptLaneKey(laneKey, publicKey);
+}
+
+String decryptLaneKeyWithJsonPrivateKey(String encryptedBase64, String privateKeyJson) {
+  final privateKey = decodePrivateKey(privateKeyJson);
+  return decryptLaneKey(encryptedBase64, privateKey);
+}
+
+

@@ -26,6 +26,7 @@ import 'package:flutter_quill/flutter_quill.dart';
 import 'theme.dart';
 import 'home.dart';
 import 'api_service.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 Future<void> _initializeTimezone() async {
   tz_data.initializeTimeZones();
@@ -103,7 +104,20 @@ void main() async {
       .setProject(AppConfig.appwriteProjectId)
       .setSelfSigned(status: true);
   appwrite.Account account = appwrite.Account(client);
-  runApp(MyApp(account: account));
+  await SentryFlutter.init(
+    (options) {
+      options.dsn = 'https://a5743f87961a65b4c73b5ef29ca4f726@o4511914388488192.ingest.de.sentry.io/4511914394124368';
+      // Set tracesSampleRate to 1.0 to capture 100% of transactions for tracing.
+      // We recommend adjusting this value in production.
+      options.tracesSampleRate = 1.0;
+      // The sampling rate for profiling is relative to tracesSampleRate
+      // Setting to 1.0 will profile 100% of sampled transactions:
+      options.profilesSampleRate = 1.0;
+    },
+    appRunner: () => runApp(SentryWidget(child: MyApp(account: account))),
+  );
+  // TODO: Remove this line after sending the first sample event to sentry.
+  await Sentry.captureException(Exception('This is a sample exception.'));
 }
 
 class MyApp extends StatefulWidget {

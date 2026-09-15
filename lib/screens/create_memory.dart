@@ -27,6 +27,7 @@ class CreateMemoryPage extends StatefulWidget {
   final bool e2eEnabled;
   final DraftMemory? draft;
   final Map<String, dynamic>? existingMemory;
+  final String? laneId;
 
   const CreateMemoryPage({
     super.key,
@@ -34,6 +35,7 @@ class CreateMemoryPage extends StatefulWidget {
     this.e2eEnabled = false,
     this.draft,
     this.existingMemory,
+    this.laneId,
   });
 
   @override
@@ -447,10 +449,15 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
 
     setState(() => _isSaving = true);
     try {
+      final currentLaneId = widget.laneId ?? widget.existingMemory?['laneId']?.toString();
       String? keyString;
       if (widget.e2eEnabled && !_isPublic) {
         const storage = FlutterSecureStorage();
-        keyString = await storage.read(key: 'memory_lanes_password');
+        if (currentLaneId != null) {
+          keyString = await storage.read(key: 'memory_lanes_password_$currentLaneId');
+        } else {
+          keyString = await storage.read(key: 'memory_lanes_password');
+        }
       }
 
       List<String> fileIds = List.from(_existingFileIds);
@@ -544,6 +551,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
           mood: mood,
           createdAt: _selectedDate.toIso8601String(),
           files: fileIds.isNotEmpty ? fileIds : null,
+          laneId: currentLaneId,
         );
       } else {
         await widget.apiService.createMemory(
@@ -555,6 +563,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
           mood: mood,
           createdAt: _selectedDate.toIso8601String(),
           files: fileIds.isNotEmpty ? fileIds : null,
+          laneId: currentLaneId,
         );
       }
 
