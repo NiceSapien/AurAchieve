@@ -68,59 +68,39 @@ jobs:
   # Build iOS (Requires macOS runner)
   #----------------------------------------------------
   build_ios:
-   name: Build Flutter (iOS)
-   runs-on: macos-26
-   steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    name: Build Flutter (iOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        channel: 'stable'
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
 
-    - name: Get Flutter dependencies
-      run: flutter pub get
+      - name: Get Flutter dependencies
+        run: flutter pub get
 
-    - name: Build Flutter iOS (Profile - No Code Signing)
-      # This command places the .app bundle at build/ios/iphoneos/Runner.app
-      run: flutter build ios --profile --no-codesign
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install --repo-update
+          cd ..
 
-    - name: Package .app into .ipa (Unsigned)
-      run: |
-        # Define paths for clarity
-        APP_BUNDLE_SOURCE="build/ios/iphoneos/Runner.app"
-        PAYLOAD_DIR="Payload"
-        OUTPUT_IPA_NAME="AurAchieve.ipa"
-        # Create the Payload directory. It will be created at the repository root.
-        mkdir -p "$PAYLOAD_DIR"
-        # Copy the Runner.app bundle into the Payload directory.
-        # This results in ./Payload/Runner.app
-        cp -r "$APP_BUNDLE_SOURCE" "$PAYLOAD_DIR/"
-        # List contents for debugging (optional, but good for verification)
-        echo "Contents of Payload directory:"
-        ls -R "$PAYLOAD_DIR"
-        # Create the .ipa file by zipping the Payload directory.
-        # The crucial part: running `zip -r <output.ipa> <directory_to_zip>/`
-        # ensures that <directory_to_zip> becomes the root of the archive.
-        # So, zipping "Payload/" from the current working directory
-        # means "Payload/" is at the root of the .ipa.
-        zip -r "$OUTPUT_IPA_NAME" "$PAYLOAD_DIR"
-        # Optional: Clean up the temporary Payload directory
-        rm -rf "$PAYLOAD_DIR"
-        echo "Generated IPA path: $(pwd)/$OUTPUT_IPA_NAME"
-        echo "Verifying IPA contents (unzipping in temp dir):"
-        mkdir -p temp_ipa_check
-        unzip -l "$OUTPUT_IPA_NAME" -d temp_ipa_check
-        echo "Contents of temp_ipa_check:"
-        ls -R temp_ipa_check
-        rm -rf temp_ipa_check
-      # Ensure this step always runs, even if previous ones fail (not needed here but good practice)
-      # if: success() || failure()
+      - name: Build Flutter iOS (Release - No Code Signing)
+        run: flutter build ios --release --no-codesign
 
-    - name: Upload Unsigned iOS IPA Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: unsigned-ios-ipa
-        path: |
-          AurAchieve.ipa
+      - name: Package .app into .ipa (Unsigned)
+        run: |
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -r AurAchieve.ipa Payload
+          rm -rf Payload
+
+      - name: Upload Unsigned iOS IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ios-ipa
+          path: AurAchieve.ipa
