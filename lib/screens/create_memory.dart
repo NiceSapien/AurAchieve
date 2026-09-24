@@ -1824,7 +1824,7 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
                                                 ).colorScheme.onSurface,
                                               ),
                                               decoration: const InputDecoration(
-                                                labelText: 'URL',
+                                                labelText: 'URL (or memory id: aurachieve://memory/<id>)',
                                                 hintText: 'aurachieve.com',
                                               ),
                                             ),
