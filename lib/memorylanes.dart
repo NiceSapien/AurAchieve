@@ -411,6 +411,9 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
         }
       }
 
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_memories', jsonEncode(memories));
+
       if (mounted) {
         setState(() {
           _memories = [...draftMemories, ...memories];
@@ -422,6 +425,35 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
       }
     } catch (e) {
       if (mounted) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          final cachedStr = prefs.getString('cached_memories');
+          if (cachedStr != null) {
+            final cachedMemories = jsonDecode(cachedStr) as List<dynamic>;
+            final drafts = await DraftManager.getDrafts();
+            final draftMemories = drafts.map((d) => {
+              'id': d.id,
+              'name': d.title,
+              'description': d.description,
+              'tag': d.tag,
+              'tagColor': d.tagColor,
+              'mood': d.mood,
+              'createdAt': DateTime.fromMillisecondsSinceEpoch(d.timestamp).toIso8601String(),
+              'isDraft': true,
+              'draftObject': d,
+            }).toList();
+            setState(() {
+              _memories = [...draftMemories, ...cachedMemories];
+              _groupMemoriesList();
+              _hasMore = false;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Offline mode: showing cached memories.')),
+            );
+            return;
+          }
+        } catch (_) {}
+
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to load memories: $e')));
@@ -1610,36 +1642,45 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     if (tag != null && tag.toString().isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: cardColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: cardColor.withValues(alpha: 0.2),
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _isSearching = true;
+                            _searchQuery = tag.toString();
+                            _searchController.text = _searchQuery;
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.label_outline_rounded,
-                              size: 12,
-                              color: cardColor,
+                          decoration: BoxDecoration(
+                            color: cardColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: cardColor.withValues(alpha: 0.2),
                             ),
-                            const SizedBox(width: 4),
-                            Text(
-                              tag.toString(),
-                              style: GoogleFonts.gabarito(
-                                fontSize: 11,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.label_outline_rounded,
+                                size: 12,
                                 color: cardColor,
-                                fontWeight: FontWeight.bold,
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 4),
+                              Text(
+                                tag.toString(),
+                                style: GoogleFonts.gabarito(
+                                  fontSize: 11,
+                                  color: cardColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     if (mood != null && mood.toString().isNotEmpty)
@@ -1722,7 +1763,7 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
   }
 
   Future<void> _openMemory(dynamic memory) async {
-    final result = await Navigator.of(context).push<bool?>(
+    final result = await Navigator.of(context).push<dynamic>(
       MaterialPageRoute(
         builder: (_) => MemoryDetailPage(
           memory: memory,
@@ -1733,6 +1774,12 @@ class _MemoryLanesPageState extends State<MemoryLanesPage>
     );
     if (result == true) {
       _loadMemories();
+    } else if (result is Map && result['action'] == 'search') {
+      setState(() {
+        _isSearching = true;
+        _searchQuery = result['query'].toString();
+        _searchController.text = _searchQuery;
+      });
     }
   }
 

@@ -256,27 +256,32 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
   }
 
   Widget _buildTagChip(String tag, Color tagColor) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: tagColor.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: tagColor.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.label_outline_rounded, size: 14, color: tagColor),
-          const SizedBox(width: 6),
-          Text(
-            tag,
-            style: GoogleFonts.gabarito(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: tagColor,
+    return GestureDetector(
+      onTap: () {
+        Navigator.of(context).pop({'action': 'search', 'query': tag});
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: tagColor.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: tagColor.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.label_outline_rounded, size: 14, color: tagColor),
+            const SizedBox(width: 6),
+            Text(
+              tag,
+              style: GoogleFonts.gabarito(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: tagColor,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -351,11 +356,26 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.gabarito(
+                  fontSize: 20,
                   fontWeight: FontWeight.bold,
                   color: colorScheme.onSurface,
                 ),
               ),
               actions: [
+                IconButton(
+                  tooltip: 'Copy Memory Link',
+                  icon: Icon(
+                    Icons.link,
+                    color: colorScheme.onSurface,
+                  ),
+                  onPressed: () {
+                    final memoryId = widget.memory['\$id'] ?? widget.memory['id'];
+                    Clipboard.setData(ClipboardData(text: 'aurachieve://memory/$memoryId'));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Memory link copied!')),
+                    );
+                  },
+                ),
                 if (isPublic)
                   Container(
                     margin: const EdgeInsets.only(right: 8),
@@ -597,12 +617,36 @@ class _MemoryDetailPageState extends State<MemoryDetailPage> {
                   controller: _quillController,
                   focusNode: _focusNode,
                   scrollController: _scrollController,
-                  config: const quill.QuillEditorConfig(
+                  config: quill.QuillEditorConfig(
                     autoFocus: false,
                     expands: false,
                     padding: EdgeInsets.zero,
                     showCursor: false,
                     enableInteractiveSelection: true,
+                    onLaunchUrl: (url) async {
+                      if (url != null) {
+                        if (url.startsWith('aurachieve://memory/')) {
+                           final memoryId = url.replaceAll('aurachieve://memory/', '');
+                           final response = await widget.apiService!.getMemories();
+                           final memories = response['documents'] as List<dynamic>? ?? [];
+                           final targetMemory = memories.where((m) => m['\$id'] == memoryId || m['id'] == memoryId).firstOrNull;
+                           if (targetMemory != null) {
+                             if (!mounted) return;
+                             Navigator.of(context).push<dynamic>(
+                               MaterialPageRoute(
+                                 builder: (_) => MemoryDetailPage(
+                                   memory: targetMemory,
+                                   apiService: widget.apiService,
+                                   e2eEnabled: widget.e2eEnabled,
+                                 ),
+                               ),
+                             );
+                           }
+                        } else {
+                           await _launchUrl(url);
+                        }
+                      }
+                    },
                   ),
                 ),
               ),
